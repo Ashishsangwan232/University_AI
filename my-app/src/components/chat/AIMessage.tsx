@@ -15,9 +15,10 @@ function inline(text: string): ReactNode[] {
     if (token.startsWith('http')) {
       nodes.push(<a key={`u-${match.index}`} href={token} target="_blank" rel="noreferrer">{token}</a>)
     } else if (token.startsWith('**') || token.startsWith('__')) {
-      nodes.push(<strong key={`b-${match.index}`}>{token.slice(2, -2)}</strong>)
+      // Formatting can wrap a link ("*Source: https://...*"), so look inside.
+      nodes.push(<strong key={`b-${match.index}`}>{inline(token.slice(2, -2))}</strong>)
     } else if (token.startsWith('*') || token.startsWith('_')) {
-      nodes.push(<em key={`i-${match.index}`}>{token.slice(1, -1)}</em>)
+      nodes.push(<em key={`i-${match.index}`}>{inline(token.slice(1, -1))}</em>)
     } else if (token.startsWith('`')) {
       nodes.push(<code key={`c-${match.index}`}>{token.slice(1, -1)}</code>)
     } else {

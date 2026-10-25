@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -9,6 +11,9 @@ class AgentChatRequest(BaseModel):
     #: Which saved thread this belongs to. Omit to start a new one; the reply
     #: carries the id to use for the rest of the conversation.
     conversation_id: str | None = Field(default=None, max_length=40)
+    #: How hard the model should think: "low", "medium" or "high". Omit for
+    #: the model's default. Higher is slower but more careful.
+    effort: Literal["low", "medium", "high"] | None = None
 
 
 class AgentChatResponse(BaseModel):

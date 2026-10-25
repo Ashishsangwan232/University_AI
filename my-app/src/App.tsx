@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import type { ChatMessage } from './types'
 import {
@@ -7,18 +7,17 @@ import {
   type AgentProviders, type Conversation, type UMSSessionStatus,
 } from './api/campusApi'
 import { Chat } from './components/chat/Chat'
+import type { MascotSubmit } from './components/chat/MascotInput'
 import { UMSBar } from './components/ums/UMSBar'
 
-const WELCOME = 'Hi! I’m CampusAI. Ask me about your attendance, timetable, notices, messages or hostel leave, or anything about LPU — contacts, rules, exam dates, hostel fees and more.'
-
 function App() {
-  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'ai', text: WELCOME }])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [thinking, setThinking] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversationId, setConversationId] = useState('')
   const [threadsOpen, setThreadsOpen] = useState(false)
-  // '' means "whatever the backend is configured to use".
-  const [provider, setProvider] = useState('')
+  // Lets the stop button abandon an answer that is still on its way.
+  const abortRef = useRef<AbortController | null>(null)
   const [models, setModels] = useState<AgentProviders | null>(null)
   const [umsStatus, setUmsStatus] = useState<UMSSessionStatus | null>(null)
   const [umsBusy, setUmsBusy] = useState(false)
@@ -56,7 +55,7 @@ function App() {
 
   const startNewChat = () => {
     setConversationId('')
-    setMessages([{ role: 'ai', text: WELCOME }])
+    setMessages([])
   }
 
   const openChat = async (id: string) => {
@@ -71,7 +70,7 @@ function App() {
             toolUsed: message.tool_used || undefined,
             model: message.model ? `${message.provider} · ${message.model}` : undefined,
           }))
-        : [{ role: 'ai', text: WELCOME }])
+        : [])
     } catch (reason) {
       setMessages(current => [...current, { role: 'ai', text: reason instanceof Error ? reason.message : 'That chat could not be opened.' }])
     }
@@ -89,13 +88,20 @@ function App() {
     } catch { /* leave it in the list if the delete failed */ }
   }
 
-  const ask = async (text: string) => {
-    const clean = text.trim()
+  const ask = async ({ prompt, provider, effort }: MascotSubmit) => {
+    const clean = prompt.trim()
     if (!clean) return
     setMessages(current => [...current, { role: 'user', text: clean }])
     setThinking(true)
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
-      const response = await askAgent(clean, provider || undefined, conversationId || undefined)
+      const response = await askAgent(clean, {
+        provider: provider || undefined,
+        conversationId: conversationId || undefined,
+        effort,
+        signal: controller.signal,
+      })
       if (response.conversation_id && response.conversation_id !== conversationId) setConversationId(response.conversation_id)
       void refreshConversations()
       const fellBack = response.fell_back_from ?? []
@@ -111,27 +117,27 @@ function App() {
           : undefined),
       }])
     } catch (reason) {
-      setMessages(current => [...current, { role: 'ai', text: reason instanceof Error ? reason.message : 'I could not reach the CampusAI backend.' }])
+      const stopped = reason instanceof DOMException && reason.name === 'AbortError'
+      setMessages(current => [...current, {
+        role: 'ai',
+        text: stopped
+          ? 'Stopped. (The answer may still be saved to this chat when the server finishes.)'
+          : reason instanceof Error ? reason.message : 'I could not reach the CampusAI backend.',
+      }])
     } finally {
+      abortRef.current = null
       setThinking(false)
     }
   }
+
+  const cancel = () => abortRef.current?.abort()
 
   return (
     <div className="app">
       <header className="topbar">
         <button className="menu-btn" aria-label="Show saved chats" onClick={() => setThreadsOpen(open => !open)}>☰</button>
         <div className="brand"><span className="brand-mark">✦</span>CampusAI</div>
-        {models && models.providers.length > 0 && (
-          <select className="model-picker" aria-label="Model" value={provider} onChange={event => setProvider(event.target.value)}>
-            <option value="">Default model</option>
-            {models.providers.map(item => (
-              <option key={item.id} value={item.id} disabled={!item.available}>
-                {item.label}{item.available ? '' : ' (no key)'}
-              </option>
-            ))}
-          </select>
-        )}
+        <button className="new-chat-btn" onClick={startNewChat} disabled={thinking}>+ New chat</button>
       </header>
 
       {backendDown ? (
@@ -149,7 +155,9 @@ function App() {
       <Chat
         messages={messages}
         ask={ask}
+        cancel={cancel}
         thinking={thinking}
+        providers={models}
         conversations={conversations}
         conversationId={conversationId}
         onNewChat={startNewChat}

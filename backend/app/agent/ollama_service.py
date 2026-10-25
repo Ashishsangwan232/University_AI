@@ -141,6 +141,7 @@ class OllamaAgent:
         db: Session,
         history: list[dict[str, str]] | None = None,
         context: str = "",
+        effort: str | None = None,
     ) -> dict[str, Any]:
         if not self.available():
             raise RuntimeError(
@@ -166,6 +167,8 @@ class OllamaAgent:
                 "tools": OLLAMA_TOOLS,
                 "stream": False,
                 "options": {"temperature": 0.2},
+                # gpt-oss takes a reasoning level: "low" / "medium" / "high".
+                **({"think": effort} if effort else {}),
             })
             reply = data.get("message") or {}
             calls = reply.get("tool_calls") or []

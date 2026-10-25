@@ -42,7 +42,8 @@ def agent_chat(payload: AgentChatRequest, db: Session = Depends(get_db)):
     """Answer with the requested model, or the configured default."""
     try:
         return AgentChatResponse(**ask_agent(
-            payload.message, STUDENT_ID, db, payload.provider, payload.conversation_id
+            payload.message, STUDENT_ID, db, payload.provider, payload.conversation_id,
+            effort=payload.effort,
         ))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"No AI backend could answer: {exc}") from exc

@@ -94,6 +94,7 @@ def ask(
     db: Session,
     requested: str | None = None,
     conversation_id: str | None = None,
+    effort: str | None = None,
 ) -> dict[str, Any]:
     """Answer with the best model that will actually respond.
 
@@ -115,7 +116,9 @@ def ask(
             continue
         try:
             agent = agent_class()
-            result = agent.chat(message, student_id, db, history=history, context=context)
+            result = agent.chat(
+                message, student_id, db, history=history, context=context, effort=effort
+            )
         except Exception as exc:  # noqa: BLE001 - any provider failure is a fallback reason
             log.warning("[agent] %s failed: %s", name, exc)
             attempts.append({"provider": name, "error": str(exc)})

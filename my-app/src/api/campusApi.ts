@@ -175,14 +175,17 @@ export type AgentProviders = { default: string; providers: AgentProvider[] }
  * reply carries the id to use from then on.
  */
 export function askAgent(
-  message: string, provider?: string, conversationId?: string,
+  message: string,
+  options: { provider?: string; conversationId?: string; effort?: 'low' | 'medium' | 'high'; signal?: AbortSignal } = {},
 ): Promise<AgentChatResponse> {
   return request<AgentChatResponse>('/api/agent/chat', {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({
       message,
-      ...(provider ? { provider } : {}),
-      ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(options.provider ? { provider: options.provider } : {}),
+      ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
+      ...(options.effort ? { effort: options.effort } : {}),
     }),
   })
 }

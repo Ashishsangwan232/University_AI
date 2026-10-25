@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../types'
-import type { Conversation } from '../../api/campusApi'
+import type { AgentProviders, Conversation } from '../../api/campusApi'
 import { AIMessage } from './AIMessage'
+import { MascotInput, type MascotSubmit } from './MascotInput'
 
 type Props = {
   messages: ChatMessage[]
-  ask: (value: string) => void
+  ask: (data: MascotSubmit) => void
+  cancel: () => void
   /** True from the moment a question is sent until the answer arrives. */
   thinking: boolean
+  providers: AgentProviders | null
   /** Saved threads, most recently used first. */
   conversations: Conversation[]
   /** The open thread, or '' for a chat that has not been saved yet. */
@@ -60,7 +63,7 @@ function Thinking() {
 
 function ThreadList({
   conversations, conversationId, onNewChat, onOpenChat, onRenameChat, onDeleteChat, threadsOpen, closeThreads,
-}: Omit<Props, 'messages' | 'ask' | 'thinking'>) {
+}: Pick<Props, 'conversations' | 'conversationId' | 'onNewChat' | 'onOpenChat' | 'onRenameChat' | 'onDeleteChat' | 'threadsOpen' | 'closeThreads'>) {
   const [renaming, setRenaming] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
 
@@ -107,23 +110,32 @@ function ThreadList({
 }
 
 export function Chat(props: Props) {
-  const { messages, ask, thinking, conversationId } = props
-  const [input, setInput] = useState('')
+  const { messages, ask, cancel, thinking, providers } = props
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [quickAsk, setQuickAsk] = useState<{ text: string; nonce: number } | null>(null)
+
+  // A chat is "fresh" until the student has asked something.
+  const fresh = !messages.some(m => m.role === 'user')
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, thinking])
-
-  const submit = (value: string) => {
-    // One question at a time, so two answers never interleave.
-    if (!value.trim() || thinking) return
-    setInput('')
-    ask(value)
-  }
+    if (!fresh) bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages, thinking, fresh])
 
   const lastAi = messages.map(m => m.role).lastIndexOf('ai')
-  const fresh = messages.length === 1 && !conversationId
+
+  const input = (
+    <MascotInput
+      onSubmit={ask}
+      onCancel={cancel}
+      isProcessing={thinking}
+      providers={providers}
+      showWelcome={fresh}
+      title="Hi! I’m CampusAI"
+      subtitle="Your attendance, classes, notices and leave from UMS — plus anything about LPU."
+      quickAsk={quickAsk}
+      menuPlacement={fresh ? 'down' : 'up'}
+    />
+  )
 
   return (
     <div className="chat-layout">
@@ -131,47 +143,41 @@ export function Chat(props: Props) {
       {props.threadsOpen && <button className="rail-overlay" aria-label="Close chat list" onClick={props.closeThreads} />}
 
       <section className="chat-window">
-        <div className="messages" aria-live="polite">
-          {messages.map((m, i) => (
-            <div key={i} className={`message ${m.role}`}>
-              {m.role === 'ai' && <span className="message-avatar">✦</span>}
-              <div className="message-content">
-                <div className="message-text">{m.role === 'ai' ? <AIMessage text={m.text} /> : m.text}</div>
-                {m.role === 'ai' && i === lastAi && (m.model || m.source) && (
-                  <div className="message-meta">
-                    {m.model && <span>{m.model}</span>}
-                    {m.source && <span>{m.source}</span>}
-                  </div>
-                )}
-                {m.role === 'ai' && m.note && <p className="message-note">{m.note}</p>}
+        {fresh ? (
+          <div className="chat-home">
+            <div className="chat-home-inner">
+              {input}
+              <div className="suggestions">
+                {SUGGESTIONS.map(text => (
+                  <button key={text} disabled={thinking} onClick={() => setQuickAsk({ text, nonce: Date.now() })}>{text}</button>
+                ))}
               </div>
             </div>
-          ))}
-          {thinking && <Thinking />}
-
-          {fresh && !thinking && (
-            <div className="suggestions">
-              {SUGGESTIONS.map(text => (
-                <button key={text} onClick={() => submit(text)}>{text}</button>
+          </div>
+        ) : (
+          <>
+            <div className="messages" aria-live="polite">
+              {messages.map((m, i) => (
+                <div key={i} className={`message ${m.role}`}>
+                  {m.role === 'ai' && <span className="message-avatar">✦</span>}
+                  <div className="message-content">
+                    <div className="message-text">{m.role === 'ai' ? <AIMessage text={m.text} /> : m.text}</div>
+                    {m.role === 'ai' && i === lastAi && (m.model || m.source) && (
+                      <div className="message-meta">
+                        {m.model && <span>{m.model}</span>}
+                        {m.source && <span>{m.source}</span>}
+                      </div>
+                    )}
+                    {m.role === 'ai' && m.note && <p className="message-note">{m.note}</p>}
+                  </div>
+                </div>
               ))}
+              {thinking && <Thinking />}
+              <div ref={bottomRef} />
             </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
-
-        <form className="chat-input" onSubmit={event => { event.preventDefault(); submit(input) }}>
-          <input
-            value={input}
-            onChange={event => setInput(event.target.value)}
-            placeholder={thinking ? 'CampusAI is working…' : 'Ask about your attendance, classes, exams, hostel…'}
-            aria-label="Ask CampusAI"
-            disabled={thinking}
-            autoFocus
-          />
-          <button type="submit" aria-label="Send" disabled={thinking || !input.trim()}>
-            {thinking ? <span className="spinner" /> : '↑'}
-          </button>
-        </form>
+            <div className="chat-dock">{input}</div>
+          </>
+        )}
       </section>
     </div>
   )
