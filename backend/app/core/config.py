@@ -3,9 +3,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "CampusAI API"
-    app_version: str = "0.16.0"
+    app_version: str = "0.17.0"
     frontend_origin: str = "http://localhost:5173"
-    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/campusai"
+    #: Saved chats live in one SQLite file. Relative paths are resolved from the
+    #: backend folder. Any SQLAlchemy URL works if you ever want a server DB.
+    database_url: str = "sqlite:///data/campusai.db"
+    #: General university facts the bot answers from. Edit it, then restart.
+    university_info_file: str = "data/university_info.md"
     # --------------------------------------------------------------- agent
     #: Which model answers by default: "ollama" or "gemini". Both use exactly
     #: the same tools, so this only changes who writes the sentences.
@@ -24,45 +28,8 @@ class Settings(BaseSettings):
     #: Never logged, never sent anywhere but the Ollama host above.
     ollama_api_key: str = ""
     ollama_timeout_seconds: int = 120
-    ollama_embedding_base_url: str = "http://localhost:11434"
-    ollama_embedding_model: str = "embeddinggemma"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
-    gemini_embedding_model: str = "gemini-embedding-001"
-    embedding_dimensions: int = 768
-    college_website_url: str = "https://www.lpu.in/"
-    rag_top_k: int = 5
-
-    # ------------------------------------------------- college knowledge base
-    #: Where the crawled site lives: chunks.jsonl, vectors.f32, index.json.
-    rag_store_dir: str = "data/rag"
-    #: Crawl budgets. The time budget is the backstop when a site is slow or
-    #: links in circles - the crawl stops and keeps what it has.
-    rag_crawl_max_pages: int = 150
-    rag_crawl_max_depth: int = 3
-    rag_crawl_delay_seconds: float = 0.5
-    rag_crawl_timeout_seconds: int = 20
-    rag_crawl_time_budget_seconds: int = 1800
-    #: It is someone else's server: identify honestly and obey robots.txt.
-    rag_user_agent: str = "CampusAI-Knowledge-Crawler/2.0 (student assistant; contact via college)"
-    rag_respect_robots: bool = True
-    #: A page shorter than this carries no answer worth storing.
-    rag_min_page_characters: int = 200
-
-    rag_chunk_characters: int = 1000
-    rag_chunk_overlap: int = 150
-
-    #: "ollama" (local daemon), "gemini", or "none" for keyword search only.
-    rag_embedding_provider: str = "ollama"
-    rag_embedding_batch_size: int = 32
-    rag_embedding_timeout_seconds: int = 180
-    #: How much of the ranking is meaning versus exact keywords. 0 is pure
-    #: keywords, 1 is pure vectors.
-    rag_vector_weight: float = 0.65
-    #: With numpy installed the whole store is compared at once. Without it,
-    #: only this many top keyword matches are rescored by meaning - which keeps
-    #: search instant on a machine that has no numpy.
-    rag_rerank_candidates: int = 400
 
     # ------------------------------------------------------- chat memory
     #: Recent turns sent to the model verbatim, so follow-ups resolve.
@@ -203,11 +170,6 @@ class Settings(BaseSettings):
     #: off as a fresh look - and asking the same thing twice in a quarter of an
     #: hour no longer drives the student's browser around the portal.
     ums_attendance_ttl_seconds: int = 900
-
-    #: When True, /api/attendance may serve PostgreSQL demo data *only* while no
-    #: UMS session is connected. It is never used once UMS is authenticated.
-    #: Set UMS_DEMO_MODE=false to make the app live-only.
-    ums_demo_mode: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

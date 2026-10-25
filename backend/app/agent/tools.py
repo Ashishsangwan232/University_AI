@@ -19,11 +19,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.rag.service import search_knowledge
+from app.knowledge import search as search_university_info
 from app.tools.attendance import (
     calculate_attendance,
-    get_attendance,
     get_attendance_detail,
     get_ums_attendance,
     get_ums_diagnostics,
@@ -37,7 +35,6 @@ from app.tools.campus import (
     get_messages_tool,
     get_next_class_tool,
     get_recent_announcements_tool,
-    get_services_tool,
     get_timetable_tool,
 )
 from app.tools.student import get_student_profile_tool
@@ -51,20 +48,9 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "get_attendance",
         "description": (
-            "Get the student's current attendance. Returns live UMS data when the UMS browser "
-            "session is authenticated, and clearly labelled PostgreSQL demo data only when UMS "
-            "is not connected. The response contains a boolean 'live' field and a 'source' label - "
-            "always tell the student which one they are seeing."
-        ),
-        "parameters": NO_ARGS,
-    },
-    {
-        "name": "get_ums_attendance",
-        "description": (
-            "Get attendance strictly from the authenticated UMS browser session, with no demo "
-            "fallback. If it is unavailable the response has available=false and a message "
-            "explaining which step failed. Use this when the student explicitly asks for their "
-            "real/UMS attendance."
+            "Get the student's current attendance, read live from UMS: overall percentage and "
+            "each course's attended/delivered classes. If UMS is not connected the response has "
+            "available=false and a message explaining which step failed."
         ),
         "parameters": NO_ARGS,
     },
@@ -245,7 +231,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "leave_type, start, end (both as 'YYYY-MM-DD HH:MM'), visit_place and reason. It "
             "returns errors to relay, or a summary with how many leaves it uses and how many "
             "remain. It does NOT submit or fill anything - after a valid draft, tell the student "
-            "to use the Fill in UMS button on the Hostel Leave page and submit it themselves. "
+            "to open Hostel Leave Application in UMS and submit it themselves. "
             "Never claim to have applied for, submitted or cancelled leave."
         ),
         "parameters": {
@@ -271,35 +257,25 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "parameters": NO_ARGS,
     },
     {
-        "name": "search_college_knowledge",
+        "name": "get_university_info",
         "description": (
-            "Search the college website knowledge base - real pages crawled from the public "
-            "college site - for official information: admissions, programmes, fees, hostel, "
-            "placements, rules, procedures, departments and facilities. Each result carries the "
-            "page title, the section heading and the URL. Read the 'guidance' field in the "
-            "response and follow it. "
-            "If results is NOT empty you have real material: answer from it and name the page, "
-            "even when it does not contain the exact number asked for - in that case say what "
-            "the site does cover and that the specific figure is not published there. Never "
-            "reply that you have no information when passages came back, and never tell the "
-            "student to go and check the college website, because these passages ARE the "
-            "college website. "
-            "available=false means the knowledge base has not been built yet; empty results "
-            "means the site genuinely does not cover it. Never invent a fee, a date or a policy."
+            "Look up general LPU information that CampusAI stores itself: contacts and phone "
+            "numbers, address, attendance rules (75% minimum), academic calendar and exam dates, "
+            "hostel rooms, hostel and mess fees, health centre, security and discipline rules, "
+            "library, placements, scholarships and fee payment. Use this for any question about "
+            "the university rather than the student's own data. Returns the best matching "
+            "sections with their source. Follow the 'guidance' field. Never invent a fee, a "
+            "date, a phone number or a policy that is not in the results."
         ),
         "parameters": {
             "type": "object",
-            "properties": {"query": {"type": "string"}},
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The topic in a few keywords, e.g. 'hostel fees' or 'exam dates'.",
+                },
+            },
             "required": ["query"],
-        },
-    },
-    {
-        "name": "get_services",
-        "description": "Search the available college services. Use a search term when provided.",
-        "parameters": {
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": [],
         },
     },
 ]
@@ -307,13 +283,12 @@ TOOL_SPECS: list[dict[str, Any]] = [
 TOOL_NAMES = tuple(spec["name"] for spec in TOOL_SPECS)
 
 SYSTEM_INSTRUCTION = (
-    "You are CampusAI, a college student assistant for a university student. "
-    "Use tools whenever the answer depends on student-specific or current campus data. "
-    "Tools return a 'live' boolean and a 'source' label: when live is false the data is demo "
-    "data, and you must say so plainly instead of presenting it as the student's real UMS data. "
-    "If a UMS tool reports available=false, explain which step failed and tell the student to "
-    "finish signing in to UMS in the CampusAI browser window - never substitute demo numbers "
-    "and never invent attendance, messages, notices or classes. "
+    "You are CampusAI, a chat assistant for a student at Lovely Professional University (LPU). "
+    "Use tools whenever the answer depends on the student's own data or on university facts. "
+    "Student data (attendance, timetable, notices, messages, leave, profile) is read live from "
+    "the UMS portal. If a UMS tool reports available=false, explain which step failed and tell "
+    "the student to click Connect UMS and finish signing in in the CampusAI browser window - "
+    "never invent attendance, messages, notices or classes. "
     "Do no arithmetic and no date or time reasoning yourself. For attendance margins call "
     "calculate_attendance; for a day's classes call get_day_classes; for a specific time call "
     "get_class_at; for what is next call get_next_class. "
@@ -338,12 +313,14 @@ SYSTEM_INSTRUCTION = (
     "You can read the student's hostel leave balance and check a draft, but you cannot apply for "
     "leave: never say you have submitted, cancelled, or changed a leave application. "
     "Do not expose database details, credentials, API keys, or internal tool mechanics. "
-    "For public college information, search the college knowledge tool and answer only from the "
-    "retrieved material, naming the page it came from. A partial match is still an answer: if "
-    "the passages cover the subject but not the exact number or date asked for, say what the "
-    "site does say, give the page, and state that the specific detail is not published there. "
-    "Only say the knowledge base has nothing when the search really returned nothing, and never "
-    "send the student off to read the college website - the knowledge base is that website. "
+    "For general university information (contacts, rules, calendar, hostel, fees, placements, "
+    "scholarships) call get_university_info and answer only from what it returns, mentioning "
+    "the source. If the stored information does not cover the exact detail, say so and give "
+    "the most relevant contact from it instead of guessing. "
+    "Every phone number, email address, fee, date and URL you write must appear exactly in a "
+    "tool result from this conversation. Never make one up, never fill in a partial number, "
+    "and never name an office or contact that the results do not list - if you need a contact "
+    "that is not in the results you have, call get_university_info with 'contact' first. "
     "This conversation has a memory: earlier turns are given to you with each question, so use "
     "what the student already told you instead of asking again. Figures quoted in that history "
     "are from when they were asked - call the tool again rather than repeating one as current. "
@@ -368,9 +345,7 @@ def execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session) 
     """
     args = args or {}
     try:
-        if name == "get_attendance":
-            return get_attendance(student_id, db)
-        if name == "get_ums_attendance":
+        if name in ("get_attendance", "get_ums_attendance"):
             return get_ums_attendance()
         if name == "get_attendance_detail":
             return get_attendance_detail()
@@ -384,20 +359,17 @@ def execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session) 
                 target_percentage=float(args["target_percentage"]),
             )
         if name == "get_timetable":
-            return get_timetable_tool(student_id, db)
+            return get_timetable_tool()
         if name == "get_day_classes":
-            return get_day_classes_tool(student_id, db, str(args.get("when") or "today"))
+            return get_day_classes_tool(str(args.get("when") or "today"))
         if name == "get_class_at":
-            return get_class_at_tool(
-                student_id, db, str(args.get("at") or ""), str(args.get("when") or "today")
-            )
+            return get_class_at_tool(str(args.get("at") or ""), str(args.get("when") or "today"))
         if name == "get_next_class":
-            return get_next_class_tool(student_id, db)
+            return get_next_class_tool()
         if name == "get_announcements":
-            return get_announcements_tool(db)
+            return get_announcements_tool()
         if name == "get_recent_announcements":
             return get_recent_announcements_tool(
-                db,
                 limit=_int(args, "limit", 10),
                 when=(args.get("when") or None),
                 query=(args.get("query") or None),
@@ -412,10 +384,8 @@ def execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session) 
             return draft_leave_tool(args)
         if name == "get_student_profile":
             return get_student_profile_tool()
-        if name == "get_services":
-            return get_services_tool(db, args.get("query"))
-        if name == "search_college_knowledge":
-            return search_knowledge(args["query"], settings.rag_top_k)
+        if name == "get_university_info":
+            return search_university_info(str(args["query"]))
     except UMSLiveAttendanceUnavailable as exc:
         # The model is told the truth rather than being handed demo numbers.
         return {
@@ -445,27 +415,15 @@ def intent_from_tools(tools: list[str]) -> str:
         return "announcements"
     if "get_student_profile" in tools:
         return "student_profile"
-    if "get_services" in tools:
-        return "services"
-    if "search_college_knowledge" in tools:
-        return "college_knowledge"
+    if "get_university_info" in tools:
+        return "university_info"
     return "general"
 
 
 def source_from_tools(tools: list[str], live_used: bool) -> str:
-    from app.ums.service import ums_is_live, ums_status
-
-    if "search_college_knowledge" in tools:
-        return "College website knowledge base"
-    if any(t in tools for t in ("get_messages", "get_hostel_leave_balance", "get_student_profile")):
-        return "UMS Playwright session (live)"
-    if any("attendance" in tool for tool in tools):
-        if live_used:
-            return "UMS Playwright session (live)"
-        status = ums_status()
-        if ums_is_live(status) and status.get("attendance_captured"):
-            return "UMS Playwright session (live)"
-        return "PostgreSQL demo data (UMS not connected)"
-    if tools:
-        return "UMS Playwright session (live)" if live_used else "PostgreSQL campus data"
+    ums_tools = [t for t in tools if t not in ("get_university_info", "calculate_attendance")]
+    if ums_tools:
+        return "UMS (live)" if live_used else "UMS (not connected)"
+    if "get_university_info" in tools:
+        return "Stored university information"
     return "Language model only"

@@ -18,6 +18,7 @@ rather than hidden - if the model you picked did not answer, you find out.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -30,6 +31,14 @@ log = logging.getLogger("campusai.agent")
 
 AGENTS = {"ollama": OllamaAgent, "gemini": GeminiAgent}
 LABELS = {"ollama": "Ollama Cloud", "gemini": "Google Gemini"}
+
+
+def _tidy(answer: str) -> str:
+    """Clean model quirks: non-breaking hyphens and spaces break links, phone
+    numbers and line wrapping, and some models leave markers like 【source】."""
+    answer = answer.replace("‑", "-").replace("‐", "-")
+    answer = answer.replace(" ", " ").replace(" ", " ")
+    return re.sub(r"\s*【[^】]*】", "", answer)
 
 
 def describe() -> dict[str, Any]:
@@ -111,6 +120,7 @@ def ask(
             log.warning("[agent] %s failed: %s", name, exc)
             attempts.append({"provider": name, "error": str(exc)})
             continue
+        result["answer"] = _tidy(result.get("answer") or "")
         result["provider_label"] = LABELS.get(name, name)
         result["fell_back_from"] = attempts
         memory.record_exchange(db, conversation, message, result)

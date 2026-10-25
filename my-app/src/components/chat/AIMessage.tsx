@@ -4,7 +4,7 @@ type Props = { text: string }
 
 function inline(text: string): ReactNode[] {
   const nodes: ReactNode[] = []
-  const pattern = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))/g
+  const pattern = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|(?<![\w/])_[^_\n]+_|`[^`\n]+`|\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>()"'`]+[^\s<>()"'`.,;:!?])/g
   let last = 0
   let match: RegExpExecArray | null
 
@@ -12,7 +12,9 @@ function inline(text: string): ReactNode[] {
     if (match.index > last) nodes.push(text.slice(last, match.index))
     const token = match[0]
 
-    if (token.startsWith('**') || token.startsWith('__')) {
+    if (token.startsWith('http')) {
+      nodes.push(<a key={`u-${match.index}`} href={token} target="_blank" rel="noreferrer">{token}</a>)
+    } else if (token.startsWith('**') || token.startsWith('__')) {
       nodes.push(<strong key={`b-${match.index}`}>{token.slice(2, -2)}</strong>)
     } else if (token.startsWith('*') || token.startsWith('_')) {
       nodes.push(<em key={`i-${match.index}`}>{token.slice(1, -1)}</em>)

@@ -1,12 +1,4 @@
-"""Attendance tools shared by the REST API, the Gemini agent, and the local agent.
-
-One rule, implemented in exactly one place (:func:`get_attendance`):
-
-    if an authenticated UMS session exists:
-        return live UMS attendance, or raise an explicit live-data-unavailable
-        error - never demo data
-    else:
-        return PostgreSQL data only when UMS_DEMO_MODE is enabled, and label it
+"""Attendance tools for the chat agent. Live UMS data only - there is no demo data.
 
 All attendance arithmetic stays in :mod:`app.services.attendance`; the LLM never
 computes it.
@@ -16,17 +8,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from sqlalchemy.orm import Session
-
-from app.core.config import settings
-from app.repositories.attendance import get_subjects
 from app.services.attendance import calculate
 from app.services.schedule import freshness as _freshness
 from app.ums.service import (
     UMSLiveAttendanceUnavailable,
-    ums_is_live,
     ums_live_attendance,
-    ums_status,
 )
 
 COURSE_CODE = re.compile(r"^\s*([A-Z]{2,5}\s?\d{3,4}[A-Z]?)\s*[:\-]?\s*(.*)$")
@@ -100,48 +86,8 @@ def live_attendance_payload() -> dict[str, Any]:
     }
 
 
-def demo_attendance_payload(student_id: str, db: Session) -> dict[str, Any]:
-    subjects = get_subjects(db, student_id)
-    attended = sum(item.attended for item in subjects)
-    total = sum(item.total for item in subjects)
-    return {
-        "overall_percentage": round(attended / total * 100, 1) if total else 0.0,
-        "subjects": [
-            {
-                "name": item.name,
-                "short": item.short,
-                "attended": item.attended,
-                "total": item.total,
-                "teacher": item.teacher,
-            }
-            for item in subjects
-        ],
-        "source": "PostgreSQL demo data (UMS not connected)",
-        "live": False,
-        "state": None,
-        "source_url": None,
-        "updated_at": None,
-    }
-
-
-def get_attendance(student_id: str, db: Session) -> dict[str, Any]:
-    """The single live-vs-demo decision for the whole application."""
-    status = ums_status()
-    if ums_is_live(status):
-        # Authenticated UMS session: live data or an explicit error. Demo data
-        # is not an acceptable answer here, ever.
-        return live_attendance_payload()
-
-    if not settings.ums_demo_mode:
-        raise UMSLiveAttendanceUnavailable(
-            "UMS is not connected and demo mode is disabled. Click Connect UMS and sign in.",
-            status.get("diagnostics", {}),
-        )
-    return demo_attendance_payload(student_id, db)
-
-
 def get_ums_attendance() -> dict[str, Any]:
-    """Live-only tool for the agent. Reports unavailability instead of guessing."""
+    """Live attendance for the agent. Reports unavailability instead of guessing."""
     try:
         return {"available": True, **live_attendance_payload()}
     except UMSLiveAttendanceUnavailable as exc:

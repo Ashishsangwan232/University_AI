@@ -3,14 +3,9 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 sqlalchemy
-psycopg[binary]
+# Gemini (optional second model)
 google-genai
-
-beautifulsoup4
+# Ollama is called over plain HTTP
 requests
+# Drives the UMS browser session
 playwright
-
-# Optional but recommended. The knowledge base stores its vectors either way -
-# numpy only makes a search compare the whole store at once instead of
-# reranking the top keyword matches.
-numpy

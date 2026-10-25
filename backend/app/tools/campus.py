@@ -1,62 +1,50 @@
-"""Campus tools shared by the REST API, the Gemini agent, and the local agent.
+"""Timetable, notices, messages and hostel leave tools for the chat agent.
 
-Announcements and messages follow the same rule as attendance: when an
-authenticated UMS session exists, they come from UMS or they raise - demo rows
-are never substituted for a connected session.
+Everything is read live from UMS. When UMS is not connected these raise
+:class:`UMSLiveAttendanceUnavailable`, which the agent turns into a plain
+"please connect UMS" answer - there is no demo data.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
-
-from app.core.config import settings
 from app.services.schedule import freshness as _freshness
-from app.repositories.campus import get_announcements, get_timetable, search_services
 from app.ums.service import UMSLiveAttendanceUnavailable, ums_is_live, ums_playwright
 
 
-def get_timetable_tool(student_id: str, db: Session, day: str | None = None) -> dict:
-    """Live UMS timetable when connected; labelled demo rows otherwise."""
-    if ums_is_live():
-        live = ums_playwright.timetable()
-        classes = [
-            {
-                "id": index,
-                "day": item["day"],
-                "time": item["time"],
-                "end": item["end"],
-                "subject": item["subject"],
-                "room": item["room"],
-                "type": item.get("type_label") or item.get("type") or "",
-                "group": item.get("group") or "",
-                "teacher": "",
-            }
-            for index, item in enumerate(live["classes"], start=1)
-        ]
-        if day:
-            classes = [c for c in classes if c["day"].lower() == day.lower()]
-        return {
-            "classes": classes,
-            "source": "UMS Playwright session (live)",
-            "live": True,
-            "updated_at": live.get("updated_at"),
-        }
-
-    if not settings.ums_demo_mode:
+def _require_ums(what: str) -> None:
+    if not ums_is_live():
         raise UMSLiveAttendanceUnavailable(
-            "UMS is not connected and demo mode is disabled. Click Connect UMS and sign in.", {}
+            f"{what} come from UMS, so UMS must be connected and signed in. Click Connect UMS.",
+            {},
         )
+
+
+def get_timetable_tool(day: str | None = None) -> dict:
+    """The student's weekly timetable, read live from UMS."""
+    _require_ums("Your timetable and classes")
+    live = ums_playwright.timetable()
+    classes = [
+        {
+            "id": index,
+            "day": item["day"],
+            "time": item["time"],
+            "end": item["end"],
+            "subject": item["subject"],
+            "room": item["room"],
+            "type": item.get("type_label") or item.get("type") or "",
+            "group": item.get("group") or "",
+            "teacher": "",
+        }
+        for index, item in enumerate(live["classes"], start=1)
+    ]
+    if day:
+        classes = [c for c in classes if c["day"].lower() == day.lower()]
     return {
-        "classes": [
-            {"id": item.id, "day": item.day, "time": item.time, "end": item.end,
-             "subject": item.subject, "room": item.room, "type": "", "group": "",
-             "teacher": item.teacher}
-            for item in get_timetable(db, student_id, day)
-        ],
-        "source": "PostgreSQL demo data (UMS not connected)",
-        "live": False,
-        "updated_at": None,
+        "classes": classes,
+        "source": "UMS (live)",
+        "live": True,
+        "updated_at": live.get("updated_at"),
     }
 
 
@@ -80,33 +68,17 @@ def _as_announcement(index: int, record: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-def get_announcements_tool(db: Session, limit: int = 20) -> dict:
-    """Live UMS announcements when connected; labelled demo rows otherwise."""
-    if ums_is_live():
-        live = ums_playwright.announcements()
-        return {
-            "announcements": [
-                _as_announcement(i, r) for i, r in enumerate(live["items"][:limit], start=1)
-            ],
-            "source": "UMS Playwright session (live)",
-            "live": True,
-            "updated_at": live.get("updated_at"),
-        }
-
-    if not settings.ums_demo_mode:
-        raise UMSLiveAttendanceUnavailable(
-            "UMS is not connected and demo mode is disabled. Click Connect UMS and sign in.", {}
-        )
-    items = get_announcements(db, limit)
+def get_announcements_tool(limit: int = 20) -> dict:
+    """Announcements, read live from UMS, newest first."""
+    _require_ums("Announcements")
+    live = ums_playwright.announcements()
     return {
         "announcements": [
-            {"id": item.id, "title": item.title, "date": item.date, "tag": item.tag,
-             "text": item.text, "important": item.important, "attachments": [], "links": []}
-            for item in items
+            _as_announcement(i, r) for i, r in enumerate(live["items"][:limit], start=1)
         ],
-        "source": "PostgreSQL demo data (UMS not connected)",
-        "live": False,
-        "updated_at": None,
+        "source": "UMS (live)",
+        "live": True,
+        "updated_at": live.get("updated_at"),
     }
 
 
@@ -129,7 +101,7 @@ def _stamped(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def get_day_classes_tool(student_id: str, db: Session, when: str = "today") -> dict:
+def get_day_classes_tool(when: str = "today") -> dict:
     """The classes on one day. The day is resolved in Python, not by the model."""
     from app.services.schedule import classes_on, resolve_day, summarise_day, today_context
 
@@ -144,7 +116,7 @@ def get_day_classes_tool(student_id: str, db: Session, when: str = "today") -> d
             ),
             **today_context(),
         }
-    table = get_timetable_tool(student_id, db)
+    table = get_timetable_tool()
     items = classes_on(table["classes"], resolved["day"])
     return {
         "understood": True,
@@ -161,7 +133,7 @@ def get_day_classes_tool(student_id: str, db: Session, when: str = "today") -> d
     }
 
 
-def get_class_at_tool(student_id: str, db: Session, at: str, when: str = "today") -> dict:
+def get_class_at_tool(at: str, when: str = "today") -> dict:
     """Which class covers a given time - "what do I have at 1:40 today".
 
     The day, the 12-vs-24 hour reading of the time, and the start <= t < end
@@ -175,7 +147,7 @@ def get_class_at_tool(student_id: str, db: Session, at: str, when: str = "today"
                 "message": f"I could not work out which day {when!r} means.",
                 **today_context()}
 
-    table = get_timetable_tool(student_id, db)
+    table = get_timetable_tool()
     found = class_at(table["classes"], resolved["day"], at)
     if not found["readings"]:
         return {"understood": False, "asked": at,
@@ -200,11 +172,11 @@ def get_class_at_tool(student_id: str, db: Session, at: str, when: str = "today"
     }
 
 
-def get_next_class_tool(student_id: str, db: Session) -> dict:
+def get_next_class_tool() -> dict:
     """The next class from right now, looked up in code."""
     from app.services.schedule import next_class, today_context
 
-    table = get_timetable_tool(student_id, db)
+    table = get_timetable_tool()
     upcoming = next_class(table["classes"])
     return {
         "found": upcoming is not None,
@@ -227,7 +199,7 @@ def _matches(record: dict[str, Any], query: str) -> bool:
 
 
 def get_recent_announcements_tool(
-    db: Session, limit: int = 10, when: str | None = None, query: str | None = None
+    limit: int = 10, when: str | None = None, query: str | None = None
 ) -> dict:
     """Announcements narrowed in code before the model ever sees them.
 
@@ -237,7 +209,7 @@ def get_recent_announcements_tool(
     """
     from app.services.schedule import resolve_day, today_context
 
-    everything = get_announcements_tool(db, limit=200)
+    everything = get_announcements_tool(limit=200)
     items = everything["announcements"]
 
     day_filter = None
@@ -307,7 +279,7 @@ def get_messages_tool(limit: int = 30, query: str | None = None) -> dict:
         "total_in_inbox": len(live["items"]),
         "total_matching": len(records),
         "query": query or "",
-        "source": "UMS Playwright session (live)",
+        "source": "UMS (live)",
         "live": True,
         "updated_at": live.get("updated_at"),
         **_freshness(live.get("updated_at")),
@@ -341,7 +313,7 @@ def get_leave_tool() -> dict:
             "CampusAI cannot submit a leave application. Open the CampusAI browser, go to "
             "Hostel Leave Application in UMS, and fill and submit it yourself."
         ),
-        "source": "UMS Playwright session (live)",
+        "source": "UMS (live)",
         "live": True,
         "updated_at": live.get("updated_at"),
         **_freshness(live.get("updated_at")),
@@ -371,19 +343,9 @@ def draft_leave_tool(draft: dict[str, Any]) -> dict[str, Any]:
     result["summary"] = summarise_draft(result)
     result["can_submit_from_campusai"] = False
     result["next_step"] = (
-        "CampusAI cannot submit this. Once the draft looks right, use Fill in UMS to have the "
-        "form typed out for you, then tick the acknowledgement and press Submit yourself."
+        "CampusAI cannot submit this. Once the draft looks right, open Hostel Leave "
+        "Application in UMS, fill it in, tick the acknowledgement and press Submit yourself."
     )
     result["leave_types"] = leave_types
     result["balances"] = balances
     return result
-
-
-def get_services_tool(db: Session, query: str | None = None) -> dict:
-    items = search_services(db, query)
-    return {"services": [
-        {"id": item.id, "name": item.name, "category": item.category,
-         "description": item.description, "location": item.location,
-         "status": item.status, "action": item.action}
-        for item in items
-    ]}
