@@ -130,12 +130,6 @@ class Settings(BaseSettings):
 
     ums_panel_max_items: int = 60
     ums_panel_max_lines: int = 20
-    #: Announcements, messages, timetable and leave are re-read when older than
-    #: this. Same reasoning as the attendance TTL above.
-    ums_panel_ttl_seconds: int = 900
-    #: The student's name does not change during a term, so it is cached for
-    #: much longer than a panel - re-reading it would re-open the leave page.
-    ums_profile_ttl_seconds: int = 3600
     #: Substrings that indicate a logged-in UMS shell. Two or more must appear
     #: (or an explicit logout control must exist) before Playwright acts.
     ums_dashboard_markers: str = "student dashboard,my academics,attendance,logout,student support,academic"
@@ -164,12 +158,25 @@ class Settings(BaseSettings):
     ums_monitor_interval_seconds: float = 2.0
     ums_table_wait_seconds: int = 25
     ums_capture_timeout_seconds: int = 90
-    #: Live attendance older than this is re-captured on the next request.
-    #: How long a reading stays good before UMS is opened again. Every tool
-    #: reports the age of what it returns, so a cached answer is never passed
-    #: off as a fresh look - and asking the same thing twice in a quarter of an
-    #: hour no longer drives the student's browser around the portal.
-    ums_attendance_ttl_seconds: int = 900
+
+    # ------------------------------------------------- prefetch & memory cache
+    #: Read everything from UMS in the background right after sign-in, so chat
+    #: answers come from memory instead of waiting on the portal. Never on disk;
+    #: cleared on Disconnect or when UMS shows its login page again.
+    ums_prefetch: bool = True
+    #: What to read, in this order (most-asked first).
+    ums_prefetch_items: str = (
+        "attendance,profile,timetable,announcements,messages,leave,attendance_detail"
+    )
+    #: Re-read an item in the background once it is older than this, while the
+    #: worker is idle. Each re-read drives the UMS window, so not too often.
+    #: 0 = read once after sign-in and never again.
+    ums_refresh_after_seconds: int = 900
+    #: Answers use cached data up to this old without waiting; older data is
+    #: read from UMS on the spot. Tools always report the data's age.
+    ums_cache_max_age_seconds: int = 3600
+    #: After a failed prefetch, wait this long before trying that item again.
+    ums_prefetch_retry_seconds: int = 120
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -231,6 +238,10 @@ class Settings(BaseSettings):
     @property
     def ums_timetable_openers_list(self) -> list[str]:
         return [o.strip() for o in self.ums_timetable_openers.split(",") if o.strip()]
+
+    @property
+    def ums_prefetch_items_list(self) -> list[str]:
+        return [k.strip().lower() for k in self.ums_prefetch_items.split(",") if k.strip()]
 
     @property
     def ums_menu_keywords_list(self) -> list[str]:

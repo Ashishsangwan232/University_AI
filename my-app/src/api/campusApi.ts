@@ -60,7 +60,18 @@ export type UMSSessionStatus = {
   attendance_updated_at: number | null
   last_error: string | null
   last_seen_at: number | null
+  /** Background read of all UMS data after sign-in, kept in memory. */
+  prefetch?: UMSPrefetch
   diagnostics: UMSDiagnostics
+}
+
+export type UMSPrefetch = {
+  enabled: boolean
+  /** The item being read right now, if any. */
+  current: string | null
+  ready_count: number
+  total: number
+  items: Record<string, { ready: boolean; age_seconds: number | null; error: string | null }>
 }
 
 export type ApiError = Error & { status?: number; state?: string | null; diagnostics?: Partial<UMSDiagnostics> }

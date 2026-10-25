@@ -96,6 +96,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .ums-bar.wait .ums-dot { background: var(--wait); animation: pulse 1.4s ease-in-out infinite; }
 .ums-text { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; }
 .ums-text span { color: var(--muted); font-size: 12px; }
+.ums-progress { flex-basis: 100%; height: 3px; border-radius: 3px; background: var(--soft); overflow: hidden; }
+.ums-progress span { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
 
 /* ---------- chat layout ---------- */
 .chat-layout {

@@ -214,7 +214,17 @@ class UMSPlaywrightService:
         self._auto_capture_attempts = 0
         self._panels: dict[str, dict[str, Any]] = {}
         self._last_seen_at: float | None = None
-        self._thread = threading.Thread(target=self._worker, name="campusai-ums-playwright", daemon=True)
+        #: Background prefetch: which item is being read right now, and the
+        #: last failure per item (time, message) so a failing page is retried
+        #: later instead of on every idle tick. Memory only.
+        self._prefetch_current: str | None = None
+        self._prefetch_errors: dict[str, tuple[float, str]] = {}
+        #: Refresh bumps the generation; an item read in an older generation is
+        #: re-read in the background. A counter, not a clock, so it is exact.
+        self._generation = 0
+        self._item_generation: dict[str, int] = {}
+        self._was_authenticated = False
+        self._thread =threading.Thread(target=self._worker, name="campusai-ums-playwright", daemon=True)
         self._thread.start()
 
     # ------------------------------------------------------------------ state
@@ -290,6 +300,7 @@ class UMSPlaywrightService:
                 "attendance_updated_at": self._attendance_updated_at,
                 "last_error": self._last_error,
                 "last_seen_at": self._last_seen_at,
+                "prefetch": self._prefetch_status(),
                 "diagnostics": diagnostics,
             }
 
@@ -318,7 +329,7 @@ class UMSPlaywrightService:
         demo data.
         """
         snapshot = self.status()
-        ttl = settings.ums_attendance_ttl_seconds if max_age_seconds is None else max_age_seconds
+        ttl = settings.ums_cache_max_age_seconds if max_age_seconds is None else max_age_seconds
         stale = (
             snapshot["attendance"] is None
             or snapshot["attendance_updated_at"] is None
@@ -665,32 +676,41 @@ class UMSPlaywrightService:
         if not info["authenticated"]:
             self._auto_capture_done = False
             self._auto_capture_attempts = 0
+            if info["login_page"] and (self._panels or self._attendance is not None):
+                # Signed out: the cached data belongs to a session that has ended.
+                self._clear_cache()
+                log.info("[UMS] Login page detected; cached UMS data cleared")
+            self._was_authenticated = False
             self._set_state(
                 UMSState.AUTHENTICATION_PENDING,
                 "Waiting for manual UMS login in the CampusAI browser window.",
             )
             return
 
-        log.info("[UMS] Authentication detected on %s", info["url"])
+        if not self._was_authenticated:
+            log.info("[UMS] Authentication detected on %s", info["url"])
+            self._was_authenticated = True
         if self._attendance is None:
             self._set_state(UMSState.AUTHENTICATED, "UMS is authenticated. Locating the Attendance Summary page.")
-        if not settings.ums_auto_navigate or self._auto_capture_done:
+        if settings.ums_auto_navigate and not self._auto_capture_done:
+            self._auto_capture_attempts += 1
+            if self._auto_capture_attempts >= settings.ums_auto_capture_attempts:
+                # Stop retrying, but say so instead of looping on the student's browser.
+                self._auto_capture_done = True
+            try:
+                self._capture(page)
+                self._auto_capture_done = True
+            except Exception as exc:  # noqa: BLE001 - surfaced in diagnostics
+                with self._status_lock:
+                    self._last_error = str(exc)
+                self._diag(last_error=str(exc))
+                log.info(
+                    "[UMS] automatic capture attempt %d/%d failed: %s",
+                    self._auto_capture_attempts, settings.ums_auto_capture_attempts, exc,
+                )
             return
-        self._auto_capture_attempts += 1
-        if self._auto_capture_attempts >= settings.ums_auto_capture_attempts:
-            # Stop retrying, but say so instead of looping on the student's browser.
-            self._auto_capture_done = True
-        try:
-            self._capture(page)
-            self._auto_capture_done = True
-        except Exception as exc:  # noqa: BLE001 - surfaced in diagnostics
-            with self._status_lock:
-                self._last_error = str(exc)
-            self._diag(last_error=str(exc))
-            log.info(
-                "[UMS] automatic capture attempt %d/%d failed: %s",
-                self._auto_capture_attempts, settings.ums_auto_capture_attempts, exc,
-            )
+        # Idle and signed in: read the next item that is missing or due.
+        self._prefetch_step()
 
     # ------------------------------------------------------------- navigation
 
@@ -949,53 +969,16 @@ class UMSPlaywrightService:
         return found
 
     def attendance_detail(self, force: bool = False) -> dict[str, Any]:
-        """Class-by-class attendance, per course.
-
-        Lives in the second tab of the same modal as the summary, so the same
-        opener applies: without that click the collapsibles do not exist.
-        """
-        cached = self._panels.get("attendance_detail")
-        if cached and not force and (time.time() - cached["updated_at"]) <= settings.ums_panel_ttl_seconds:
-            return cached
-        status = self.status()
-        if not status["browser_connected"] or not status["authenticated"]:
-            raise UMSLiveAttendanceUnavailable(self._unavailable_reason(status), status["diagnostics"])
-        result = self._call(self._capture_detail, timeout=settings.ums_capture_timeout_seconds)
-        self._panels["attendance_detail"] = result
-        return result
+        """Class-by-class attendance, per course."""
+        return self._get("attendance_detail", force)
 
     def leave(self, force: bool = False) -> dict[str, Any]:
-        """Hostel leave balances and authorities. READ ONLY.
-
-        Opens the leave page with a GET, reads it, and navigates back. Nothing on
-        that page is filled in, ticked, or clicked - there is no code path from
-        here to Submit.
-        """
-        cached = self._panels.get("leave")
-        if cached and not force and (time.time() - cached["updated_at"]) <= settings.ums_panel_ttl_seconds:
-            return cached
-        status = self.status()
-        if not status["browser_connected"] or not status["authenticated"]:
-            raise UMSLiveAttendanceUnavailable(self._unavailable_reason(status), status["diagnostics"])
-        result = self._call(self._capture_leave, timeout=settings.ums_capture_timeout_seconds)
-        self._panels["leave"] = result
-        return result
+        """Hostel leave balances and authorities. READ ONLY - nothing is filled or submitted."""
+        return self._get("leave", force)
 
     def student_profile(self, force: bool = False) -> dict[str, Any]:
-        """Who the student is, read from UMS. READ ONLY.
-
-        The app shipped with a hardcoded demo identity; this replaces it with the
-        real one. Nothing here fills or clicks anything.
-        """
-        cached = self._panels.get("profile")
-        if cached and not force and (time.time() - cached["updated_at"]) <= settings.ums_profile_ttl_seconds:
-            return cached
-        status = self.status()
-        if not status["browser_connected"] or not status["authenticated"]:
-            raise UMSLiveAttendanceUnavailable(self._unavailable_reason(status), status["diagnostics"])
-        result = self._call(self._capture_profile, timeout=settings.ums_capture_timeout_seconds)
-        self._panels["profile"] = result
-        return result
+        """Who the student is, read from UMS. READ ONLY."""
+        return self._get("profile", force)
 
     def prefill_leave(self, draft: dict[str, Any]) -> dict[str, Any]:
         """Type a validated draft into the UMS leave form and STOP.
@@ -1020,58 +1003,152 @@ class UMSPlaywrightService:
 
     def timetable(self, force: bool = False) -> dict[str, Any]:
         """Live timetable from the authenticated UMS session."""
-        cached = self._panels.get("timetable")
-        if cached and not force and (time.time() - cached["updated_at"]) <= settings.ums_panel_ttl_seconds:
-            return cached
-        status = self.status()
-        if not status["browser_connected"] or not status["authenticated"]:
-            raise UMSLiveAttendanceUnavailable(self._unavailable_reason(status), status["diagnostics"])
-        result = self._call(self._capture_timetable, timeout=settings.ums_capture_timeout_seconds)
-        self._panels["timetable"] = result
-        return result
+        return self._get("timetable", force)
 
     def announcements(self, force: bool = False) -> dict[str, Any]:
         """Live announcements from the authenticated UMS session."""
-        return self._panel(
-            "announcements",
-            settings.ums_announcement_containers_list,
-            settings.ums_announcement_openers_list,
-            settings.ums_announcement_page,
-            force,
-        )
+        return self._get("announcements", force)
 
     def messages(self, force: bool = False) -> dict[str, Any]:
         """Live messages from the authenticated UMS session."""
-        return self._panel(
-            "messages",
-            settings.ums_message_containers_list,
-            settings.ums_message_openers_list,
-            settings.ums_message_page,
-            force,
-        )
+        return self._get("messages", force)
 
-    def _panel(
-        self, kind: str, containers: list[str], openers: list[str], page_path: str, force: bool
-    ) -> dict[str, Any]:
-        cached = self._panels.get(kind)
-        fresh = (
-            cached
-            and not force
-            and (time.time() - cached["updated_at"]) <= settings.ums_panel_ttl_seconds
-        )
-        if fresh:
-            return cached
+    # ------------------------------------------------------- cache & prefetch
+    #
+    # Everything read from UMS is kept in memory (never on disk) so a chat
+    # answer can use it at once. Right after sign-in the idle monitor reads
+    # each item in turn; later it re-reads items older than
+    # UMS_REFRESH_AFTER_SECONDS. A question that arrives meanwhile is queued
+    # between items, so it never waits for the whole prefetch.
 
+    def _age(self, kind: str) -> float | None:
+        """Seconds since this item was read, or None if it has not been."""
+        if kind == "attendance":
+            stamp = self._attendance_updated_at if self._attendance is not None else None
+        else:
+            entry = self._panels.get(kind)
+            stamp = entry.get("updated_at") if entry else None
+        return None if stamp is None else time.time() - stamp
+
+    def _cached(self, kind: str) -> dict[str, Any] | None:
+        age = self._age(kind)
+        if age is None or age > settings.ums_cache_max_age_seconds:
+            return None
+        return self._panels.get(kind)
+
+    def _get(self, kind: str, force: bool = False) -> dict[str, Any]:
+        """Cached data when recent enough, otherwise read it from UMS now."""
+        if not force:
+            cached = self._cached(kind)
+            if cached is not None:
+                return cached
         status = self.status()
         if not status["browser_connected"] or not status["authenticated"]:
             raise UMSLiveAttendanceUnavailable(self._unavailable_reason(status), status["diagnostics"])
 
-        result = self._call(
-            lambda: self._capture_panel(kind, containers, openers, page_path),
-            timeout=settings.ums_capture_timeout_seconds,
-        )
+        def run() -> dict[str, Any]:
+            # The prefetch may have read it while this request was queued.
+            if not force:
+                cached = self._cached(kind)
+                if cached is not None:
+                    return cached
+            return self._fetch_now(kind)
+
+        return self._call(run, timeout=settings.ums_capture_timeout_seconds)
+
+    def _fetch_now(self, kind: str) -> dict[str, Any]:
+        """Read one item from UMS and cache it. Runs on the worker thread."""
+        if kind == "attendance":
+            page = self._pick_ums_page()
+            if page is None:
+                raise UMSLiveAttendanceUnavailable(
+                    f"No {settings.ums_host} tab is open in the CampusAI browser.", self.diagnostics()
+                )
+            self._capture(page)
+            self._item_generation[kind] = self._generation
+            return self._attendance or {}
+        if kind == "attendance_detail":
+            result = self._capture_detail()
+        elif kind == "leave":
+            result = self._capture_leave()
+        elif kind == "profile":
+            result = self._capture_profile()
+        elif kind == "timetable":
+            result = self._capture_timetable()
+        elif kind == "announcements":
+            result = self._capture_panel(
+                "announcements",
+                settings.ums_announcement_containers_list,
+                settings.ums_announcement_openers_list,
+                settings.ums_announcement_page,
+            )
+        elif kind == "messages":
+            result = self._capture_panel(
+                "messages",
+                settings.ums_message_containers_list,
+                settings.ums_message_openers_list,
+                settings.ums_message_page,
+            )
+        else:
+            raise ValueError(f"Unknown UMS item {kind!r}")
         self._panels[kind] = result
+        self._item_generation[kind] = self._generation
         return result
+
+    def _prefetch_due(self, kind: str) -> bool:
+        failed = self._prefetch_errors.get(kind)
+        if failed and time.time() - failed[0] < settings.ums_prefetch_retry_seconds:
+            return False
+        age = self._age(kind)
+        if age is None or self._item_generation.get(kind, 0) < self._generation:
+            return True
+        refresh = settings.ums_refresh_after_seconds
+        return refresh > 0 and age > refresh
+
+    def _prefetch_step(self) -> None:
+        """Read the first missing or stale item. One per idle tick."""
+        if not settings.ums_prefetch:
+            return
+        kind = next((k for k in settings.ums_prefetch_items_list if self._prefetch_due(k)), None)
+        if kind is None:
+            return
+        self._prefetch_current = kind
+        started = time.time()
+        try:
+            self._fetch_now(kind)
+            self._prefetch_errors.pop(kind, None)
+            log.info("[UMS] prefetched %s in %.1fs", kind, time.time() - started)
+        except Exception as exc:  # noqa: BLE001 - retried later, reported in status
+            self._prefetch_errors[kind] = (time.time(), str(exc))
+            log.info("[UMS] prefetch of %s failed: %s", kind, exc)
+        finally:
+            self._prefetch_current = None
+
+    def _prefetch_status(self) -> dict[str, Any]:
+        items = {}
+        for kind in settings.ums_prefetch_items_list:
+            age = self._age(kind)
+            failed = self._prefetch_errors.get(kind)
+            items[kind] = {
+                "ready": age is not None,
+                "age_seconds": None if age is None else round(age),
+                "error": failed[1] if failed else None,
+            }
+        return {
+            "enabled": settings.ums_prefetch,
+            "current": self._prefetch_current,
+            "ready_count": sum(1 for item in items.values() if item["ready"]),
+            "total": len(items),
+            "items": items,
+        }
+
+    def _clear_cache(self) -> None:
+        with self._status_lock:
+            self._attendance = None
+            self._attendance_updated_at = None
+            self._panels = {}
+            self._prefetch_errors = {}
+            self._item_generation = {}
 
     def inspect(
         self,
@@ -1971,7 +2048,12 @@ class UMSPlaywrightService:
             )
         self._set_state(UMSState.AUTHENTICATED)
         self._auto_capture_attempts = 0
+        # Re-read everything else in the background too; the old data keeps
+        # answering questions until each item has been read again.
+        self._generation += 1
+        self._prefetch_errors = {}
         self._capture(page)
+        self._item_generation["attendance"] = self._generation
         self._auto_capture_done = True
         return self.status()
 
@@ -2007,6 +2089,10 @@ class UMSPlaywrightService:
             self._attendance = None
             self._attendance_updated_at = None
             self._panels = {}
+            self._prefetch_errors = {}
+            self._item_generation = {}
+            self._prefetch_current = None
+            self._was_authenticated = False
             self._auto_capture_done = False
             self._auto_capture_attempts = 0
             self._auth_flags = {"authenticated": False, "verification_required": False, "login_page": False}
