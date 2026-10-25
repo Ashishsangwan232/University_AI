@@ -394,12 +394,19 @@ def validate_attendance(parsed: dict[str, Any]) -> tuple[bool, str]:
 
     pct = aggregate.get("percentage")
     if pct is not None and agg_delivered:
-        computed = agg_attended / agg_delivered * 100
+        computed = round(agg_attended / agg_delivered * 100, 1)
         if abs(computed - pct) > 2.0:
-            return False, (
-                f"aggregate percentage {pct} disagrees with {agg_attended}/"
-                f"{agg_delivered} = {computed:.1f}"
+            # Not a mis-parse: the counts above already matched the course rows.
+            # LPU's own aggregate counts duty leave as attended, while the
+            # attended column does not, so the two percentages legitimately
+            # differ. Keep both and say why, rather than rejecting real data.
+            aggregate["counted_percentage"] = computed
+            aggregate["note"] = (
+                f"UMS reports {pct}% overall; counting classes attended gives "
+                f"{agg_attended}/{agg_delivered} = {computed}%. The difference is "
+                "usually duty leave, which UMS counts towards the overall figure."
             )
+            return True, f"ok (UMS {pct}% vs counted {computed}%)"
 
     return True, "ok"
 

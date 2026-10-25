@@ -218,13 +218,15 @@ class UMSPlaywrightService:
         #: last failure per item (time, message) so a failing page is retried
         #: later instead of on every idle tick. Memory only.
         self._prefetch_current: str | None = None
-        self._prefetch_errors: dict[str, tuple[float, str]] = {}
+        #: kind -> (failed at, message, consecutive failures)
+        self._prefetch_errors: dict[str, tuple[float, str, int]] = {}
         #: Refresh bumps the generation; an item read in an older generation is
         #: re-read in the background. A counter, not a clock, so it is exact.
         self._generation = 0
         self._item_generation: dict[str, int] = {}
         self._was_authenticated = False
-        self._thread =threading.Thread(target=self._worker, name="campusai-ums-playwright", daemon=True)
+        self._unauth_streak = 0
+        self._thread = threading.Thread(target=self._worker, name="campusai-ums-playwright", daemon=True)
         self._thread.start()
 
     # ------------------------------------------------------------------ state
@@ -649,6 +651,18 @@ class UMSPlaywrightService:
             return
 
         info = self._classify(page)
+        if (
+            not info["authenticated"]
+            and self._was_authenticated
+            and not info["login_page"]
+            and not info["verification_required"]
+            and self._unauth_streak < 5
+        ):
+            # Probably caught a page mid-load. Only believe "signed out" after
+            # a few readings in a row, unless the login page is actually showing.
+            self._unauth_streak += 1
+            return
+        self._unauth_streak = 0
         with self._status_lock:
             self._last_seen_at = now
             self._auth_flags = {
@@ -692,7 +706,13 @@ class UMSPlaywrightService:
             self._was_authenticated = True
         if self._attendance is None:
             self._set_state(UMSState.AUTHENTICATED, "UMS is authenticated. Locating the Attendance Summary page.")
-        if settings.ums_auto_navigate and not self._auto_capture_done:
+        elif self._state is UMSState.AUTHENTICATION_PENDING:
+            self._set_state(UMSState.READY, "UMS is authenticated and live data is cached.")
+        # With prefetch on, attendance is simply its first item - one attempt,
+        # then the other items, then a retry later. The old loop below tried
+        # attendance three times in a row first, which could take many minutes
+        # and held everything else (chat questions included) up behind it.
+        if settings.ums_auto_navigate and not self._auto_capture_done and not settings.ums_prefetch:
             self._auto_capture_attempts += 1
             if self._auto_capture_attempts >= settings.ums_auto_capture_attempts:
                 # Stop retrying, but say so instead of looping on the student's browser.
@@ -1097,8 +1117,12 @@ class UMSPlaywrightService:
 
     def _prefetch_due(self, kind: str) -> bool:
         failed = self._prefetch_errors.get(kind)
-        if failed and time.time() - failed[0] < settings.ums_prefetch_retry_seconds:
-            return False
+        if failed:
+            # Back off: 2, 4, 8 ... minutes, at most 30, so a page that keeps
+            # failing does not keep tying up the browser.
+            wait = min(settings.ums_prefetch_retry_seconds * 2 ** (failed[2] - 1), 1800)
+            if time.time() - failed[0] < wait:
+                return False
         age = self._age(kind)
         if age is None or self._item_generation.get(kind, 0) < self._generation:
             return True
@@ -1119,7 +1143,8 @@ class UMSPlaywrightService:
             self._prefetch_errors.pop(kind, None)
             log.info("[UMS] prefetched %s in %.1fs", kind, time.time() - started)
         except Exception as exc:  # noqa: BLE001 - retried later, reported in status
-            self._prefetch_errors[kind] = (time.time(), str(exc))
+            count = self._prefetch_errors.get(kind, (0, "", 0))[2] + 1
+            self._prefetch_errors[kind] = (time.time(), str(exc), count)
             log.info("[UMS] prefetch of %s failed: %s", kind, exc)
         finally:
             self._prefetch_current = None

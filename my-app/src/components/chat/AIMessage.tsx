@@ -44,6 +44,24 @@ export function AIMessage({ text }: Props) {
   let listItems: ReactNode[] = []
   let codeLines: string[] = []
   let inCode = false
+  let tableLines: string[] = []
+
+  const flushTable = () => {
+    const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())
+    // Drop the |---|:--:| separator row.
+    const rows = tableLines.filter(row => !/^\s*\|?[\s:|-]+\|?\s*$/.test(row)).map(cells)
+    tableLines = []
+    if (!rows.length) return
+    const [head, ...body] = rows
+    blocks.push(
+      <div className="table-wrap" key={`table-${blocks.length}`}>
+        <table>
+          <thead><tr>{head.map((cell, i) => <th key={i}>{inline(cell)}</th>)}</tr></thead>
+          <tbody>{body.map((row, r) => <tr key={r}>{row.map((cell, i) => <td key={i}>{inline(cell)}</td>)}</tr>)}</tbody>
+        </table>
+      </div>,
+    )
+  }
 
   const flushList = () => {
     if (!listType || !listItems.length) return
@@ -74,6 +92,15 @@ export function AIMessage({ text }: Props) {
 
     if (inCode) {
       codeLines.push(line)
+      return
+    }
+
+    // Markdown table: consecutive lines that start and end with "|".
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      flushList()
+      tableLines.push(line)
+      const next = lines[index + 1]
+      if (next === undefined || !/^\s*\|.*\|\s*$/.test(next)) flushTable()
       return
     }
 

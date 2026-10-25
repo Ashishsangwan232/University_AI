@@ -221,6 +221,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .ai-message pre { padding: 10px 12px; border-radius: 8px; background: var(--mint); overflow-x: auto; }
 .ai-message pre code { padding: 0; background: none; }
+.ai-message .table-wrap { overflow-x: auto; }
+.ai-message table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+.ai-message th, .ai-message td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.ai-message th { font-weight: 700; color: var(--muted); font-size: 12px; }
 
 @keyframes bounce { 0%, 80%, 100% { transform: scale(.6); opacity: .5 } 40% { transform: scale(1); opacity: 1 } }
 @keyframes spin { to { transform: rotate(360deg) } }

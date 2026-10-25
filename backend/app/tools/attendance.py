@@ -73,6 +73,10 @@ def live_attendance_payload() -> dict[str, Any]:
 
     return {
         "overall_percentage": float(str(pct).replace("%", "").strip()),
+        # Set when UMS's overall figure differs from attended/delivered -
+        # usually because UMS counts duty leave. Both are real; say which is which.
+        "counted_percentage": aggregate.get("counted_percentage"),
+        "note": aggregate.get("note"),
         "subjects": subjects,
         "source": "UMS Playwright session (live)",
         "live": True,
