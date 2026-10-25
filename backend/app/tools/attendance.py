@@ -15,7 +15,7 @@ from app.ums.service import (
     ums_live_attendance,
 )
 
-COURSE_CODE = re.compile(r"^\s*([A-Z]{2,5}\s?\d{3,4}[A-Z]?)\s*[:\-]?\s*(.*)$")
+COURSE_CODE = re.compile(r"^\s*([A-Z]{2,5}\s?\d{2,4}[A-Z]?)\s*[:\-]?\s*(.*)$")
 
 
 def _subject_from_course(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -114,7 +114,9 @@ def get_attendance_detail() -> dict[str, Any]:
                 "state": (exc.diagnostics or {}).get("state")}
     return {
         "available": True,
+        "live": True,
         "source": live["source"],
+        **_freshness(live.get("updated_at")),
         "courses": [
             {
                 "code": course["code"],

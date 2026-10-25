@@ -53,10 +53,10 @@ class Settings(BaseSettings):
     #: Comma-separated candidate attendance pages, tried in order when no
     #: in-portal "Attendance" link can be clicked. Each attempt is logged and
     #: recorded in diagnostics; nothing here is assumed to work.
-    ums_attendance_paths: str = (
-        "Reports/rptCourseWiseStudentAttendance.aspx,"
-        "frmStudentCourseWiseAttendanceSummary.aspx"
-    )
+    #: Empty by default: frmStudentCourseWiseAttendanceSummary.aspx is a 404 on
+    #: LPU UMS now, and navigating there stranded the browser on an error page.
+    #: Attendance is loaded on the dashboard via GetAttendanceDetails() instead.
+    ums_attendance_paths: str = ""
     #: Controls clicked to LOAD an attendance panel that has no URL of its own.
     #: LPU UMS renders the table into a modal only after the dashboard tile
     #: #AttPercent calls getAtt(); until then no table exists in the DOM.
@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     #: Collapsibles holding the per-course class log in the attendance modal's
     #: second tab: #collapseCSE329, #collapseINT373, and so on.
     ums_attendance_detail_selector: str = "[id^=collapse]"
+    #: The page functions UMS's own Attendance tile calls (getAtt() runs both):
+    #: read-only requests that fill the summary table and the class-by-class
+    #: logs. Calling them directly avoids opening the modal, so a UMS pop-up
+    #: covering the tile doesn't matter. Empty = always click the tile instead.
+    ums_attendance_summary_loader: str = "GetAttendanceDetails"
+    ums_attendance_detail_loader: str = "GetDayWiseAttDetails"
 
     #: Close the panel we opened once the table has been read.
     ums_close_after_capture: bool = True

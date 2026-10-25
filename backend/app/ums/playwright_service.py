@@ -71,7 +71,10 @@ ATTENDANCE_WORD = re.compile(r"attendance", re.I)
 TABLES_JS = r"""
 () => {
   const out = [];
-  const tables = Array.from(document.querySelectorAll('table')).slice(0, 40);
+  // Skip the per-course class logs (109 tables in LPU's attendance modal);
+  // they are read separately and would push the summary past the limit.
+  const tables = Array.from(document.querySelectorAll('table'))
+    .filter(t => !t.closest('[id^=collapse]')).slice(0, 60);
   for (const t of tables) {
     const rows = Array.from(t.querySelectorAll('tr')).slice(0, 400).map(r =>
       Array.from(r.querySelectorAll('th,td')).map(c =>
@@ -226,6 +229,7 @@ class UMSPlaywrightService:
         self._item_generation: dict[str, int] = {}
         self._was_authenticated = False
         self._unauth_streak = 0
+        self._last_heal_at = 0.0
         self._thread = threading.Thread(target=self._worker, name="campusai-ums-playwright", daemon=True)
         self._thread.start()
 
@@ -653,10 +657,27 @@ class UMSPlaywrightService:
         info = self._classify(page)
         if (
             not info["authenticated"]
+            and not info["login_page"]
+            and not info["verification_required"]
+            and self._is_error_page(info)
+            and time.time() - self._last_heal_at > 30
+        ):
+            # Stranded on a UMS error page (e.g. a 404 an old fallback URL led
+            # to, or a capture cut off by a backend reload). Go back to the
+            # dashboard; if the session really ended, that shows the login page.
+            self._last_heal_at = time.time()
+            log.info("[UMS] On an error page (%r); returning to %s", info.get("title"), settings.ums_url)
+            try:
+                page.goto(settings.ums_url, wait_until="domcontentloaded", timeout=20000)
+            except Exception as exc:  # noqa: BLE001
+                log.info("[UMS] could not leave the error page: %s", type(exc).__name__)
+            return
+        if (
+            not info["authenticated"]
             and self._was_authenticated
             and not info["login_page"]
             and not info["verification_required"]
-            and self._unauth_streak < 5
+            and self._unauth_streak < 15
         ):
             # Probably caught a page mid-load. Only believe "signed out" after
             # a few readings in a row, unless the login page is actually showing.
@@ -800,8 +821,10 @@ class UMSPlaywrightService:
             # We opened a modal on the student's screen; put it back.
             try:
                 target.keyboard.press("Escape")
+                time.sleep(0.6)  # let the close animation finish
             except Exception:  # noqa: BLE001
                 pass
+            self._clear_stray_backdrop(target)
         self._set_state(UMSState.ATTENDANCE_STORED)
         log.info("[UMS] Attendance stored")
         self._set_state(UMSState.READY, "Live UMS attendance captured by Playwright.")
@@ -862,6 +885,17 @@ class UMSPlaywrightService:
         """
         origin = page.url
         log.info("[UMS] Navigating to attendance from %s", origin)
+
+        # Load the summary the way UMS's own tile does, without opening the
+        # modal: works even when a UMS pop-up (e.g. the Campus Drive
+        # notification shown after every reload) covers the tile, and nothing
+        # moves on the student's screen. It empties the old table first, so
+        # this always reads fresh numbers - unlike re-reading a table that is
+        # still sitting in the hidden modal from an earlier load.
+        if self._call_page_function(page, settings.ums_attendance_summary_loader, attempts):
+            if self._wait_for_attendance_table(page) is not None:
+                log.info("[UMS] Attendance summary loaded via %s()", settings.ums_attendance_summary_loader)
+                return page, None
 
         if self._scan_frames(page) is not None:
             attempts.append("already-on-attendance-page")
@@ -943,6 +977,77 @@ class UMSPlaywrightService:
         except Exception as exc:  # noqa: BLE001
             log.info("[UMS] could not restore original page: %s", type(exc).__name__)
 
+    def _call_page_function(self, page: Page, name: str, attempts: list[str]) -> bool:
+        """Call one of UMS's own (read-only) loader functions if the page has it.
+
+        These are what the dashboard tiles call on click. Calling them directly
+        fetches the same data without opening a modal or needing a click.
+        """
+        if not name:
+            return False
+        if "dashboard" in (page.url or "").lower():
+            self._wait_for_opener(page, 10)  # page scripts ready after a reload
+        try:
+            called = bool(page.evaluate(
+                "(name) => { if (typeof window[name] !== 'function') return false;"
+                " window[name](); return true; }",
+                name,
+            ))
+        except Exception as exc:  # noqa: BLE001 - page navigating
+            log.info("[UMS] calling %s() failed: %s", name, type(exc).__name__)
+            return False
+        if called:
+            attempts.append(f"called:{name}()")
+            log.info("[UMS] Called UMS page function %s()", name)
+        return called
+
+    @staticmethod
+    def _is_error_page(info: dict[str, Any]) -> bool:
+        title = (info.get("title") or "").lower()
+        return any(text in title for text in (
+            "resource cannot be found", "server error", "runtime error", "404", "not found",
+        ))
+
+    @staticmethod
+    def _clear_stray_backdrop(page: Page) -> None:
+        """Remove a Bootstrap backdrop left behind with no modal open.
+
+        It covers the whole page and swallows clicks - the student's as well as
+        ours. Only acts when no modal is actually showing.
+        """
+        try:
+            removed = page.evaluate(
+                """() => {
+                    if (document.querySelector('.modal.show, .modal.in')) return 0;
+                    const stray = document.querySelectorAll('.modal-backdrop');
+                    stray.forEach(e => e.remove());
+                    document.body.classList.remove('modal-open');
+                    document.body.style.removeProperty('padding-right');
+                    document.body.style.removeProperty('overflow');
+                    return stray.length;
+                }"""
+            )
+            if removed:
+                log.info("[UMS] Removed %d leftover modal backdrop(s)", removed)
+        except Exception:  # noqa: BLE001 - page navigating
+            pass
+
+    def _wait_for_opener(self, page: Page, seconds: float) -> bool:
+        """Wait until an attendance opener (the dashboard tile) is visible."""
+        deadline = time.time() + seconds
+        while True:
+            for selector in settings.ums_attendance_openers_list:
+                for frame in page.frames:
+                    try:
+                        locator = frame.locator(selector).first
+                        if locator.count() and locator.is_visible():
+                            return True
+                    except Exception:  # noqa: BLE001 - frame navigating or detached
+                        continue
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.5)
+
     def _click_openers(self, page: Page, attempts: list[str]) -> tuple[Page, dict[str, Any] | None] | None:
         """Click the configured controls that *load* the attendance panel.
 
@@ -951,12 +1056,28 @@ class UMSPlaywrightService:
         until that click there is no table in the DOM to find - no amount of
         navigating or frame searching would ever have located it.
         """
+        if "dashboard" in (page.url or "").lower():
+            # Just after a reload (e.g. coming back from the leave page) the
+            # dashboard tiles take a few seconds to appear; checking once at
+            # that moment finds nothing and gives up.
+            self._wait_for_opener(page, 10)
+        self._clear_stray_backdrop(page)
+        clicked: set[str] = set()
         for selector in settings.ums_attendance_openers_list:
             for frame in page.frames:
                 try:
                     locator = frame.locator(selector).first
                     if not locator.count() or not locator.is_visible():
                         continue
+                    # "#AttPercent" and "[onclick*='getAtt']" are the same tile.
+                    # Clicking it twice toggles the modal shut mid-animation and
+                    # leaves a backdrop over the page that blocks every click.
+                    element_key = frame.url + "|" + locator.evaluate(
+                        "e => e.id || e.outerHTML.slice(0, 200)"
+                    )
+                    if element_key in clicked:
+                        continue
+                    clicked.add(element_key)
                 except Exception:  # noqa: BLE001
                     continue
                 attempts.append(f"opener:{selector}")
@@ -1565,8 +1686,8 @@ class UMSPlaywrightService:
         attempts: list[str] = []
         selector = settings.ums_attendance_detail_selector
 
-        courses: dict[str, Any] = {}
-        for attempt in range(2):
+        def read() -> dict[str, Any]:
+            found_all: dict[str, Any] = {}
             for frame in page.frames:
                 try:
                     payload = frame.evaluate(DETAIL_JS, {"selector": selector})
@@ -1575,13 +1696,33 @@ class UMSPlaywrightService:
                 found = parse_detail_tables(payload)
                 if found:
                     attempts.append(f"{selector}:{len(found)} in {frame.url[:60]}")
-                    courses.update({k: v for k, v in found.items() if k not in courses})
-            if courses or attempt:
-                break
-            # Nothing there yet: the modal has not been opened this session.
-            log.info("[UMS] No class logs found; opening the attendance panel first")
-            if self._click_openers(page, attempts) is None:
-                break
+                    found_all.update({k: v for k, v in found.items() if k not in found_all})
+            return found_all
+
+        def wait_for_logs(seconds: float) -> dict[str, Any]:
+            deadline = time.time() + seconds
+            while True:
+                found = read()
+                if found or time.time() >= deadline:
+                    return found
+                time.sleep(0.75)
+
+        # The Attendance tile (getAtt) makes TWO requests: the summary and,
+        # separately, the class-by-class log, which empties its area first and
+        # fills it when the server replies - usually after the summary. So the
+        # log may still be on its way from a recent click: wait briefly first,
+        # and after clicking, keep checking rather than looking once.
+        courses = wait_for_logs(3)
+        if not courses:
+            # Ask UMS for the log the way its own tile does, but without opening
+            # the modal: nothing moves on the student's screen and there is no
+            # click to be blocked. Falls back to clicking the tile.
+            if self._call_page_function(page, settings.ums_attendance_detail_loader, attempts):
+                courses = wait_for_logs(settings.ums_table_wait_seconds)
+            if not courses:
+                log.info("[UMS] No class logs yet; opening the attendance panel")
+                if self._click_openers(page, attempts) is not None:
+                    courses = wait_for_logs(settings.ums_table_wait_seconds)
 
         ok, reason = validate_detail(courses)
         log.info("[UMS] Attendance detail: %d course(s), valid=%s (%s)", len(courses), ok, reason)

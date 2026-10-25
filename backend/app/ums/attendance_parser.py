@@ -12,7 +12,8 @@ from typing import Any
 
 log = logging.getLogger("campusai.ums")
 
-COURSE_CODE = re.compile(r"\b([A-Z]{2,5}\s?\d{3,4}[A-Z]?)\b")
+# Two to four digits: LPU has codes like CSE408 and also PEAS01 / PEVS01.
+COURSE_CODE = re.compile(r"\b([A-Z]{2,5}\s?\d{2,4}[A-Z]?)\b")
 TOTAL_WORDS = ("total", "aggregate", "overall", "grand total", "summary")
 
 
@@ -81,9 +82,14 @@ DETAIL_JS = r"""
 (cfg) => {
   const tidy = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const out = [];
-  for (const el of Array.from(document.querySelectorAll(cfg.selector)).slice(0, 40)) {
+  // UMS repeats each course's block many times (109 blocks for 8 courses);
+  // the copies are identical, so read the first of each id only.
+  const seen = new Set();
+  for (const el of Array.from(document.querySelectorAll(cfg.selector)).slice(0, 1000)) {
+    if (seen.has(el.id)) continue;
     const table = el.querySelector('table');
     if (!table) continue;
+    seen.add(el.id);
     const rows = Array.from(table.querySelectorAll('tr')).slice(0, 400).map(r =>
       Array.from(r.querySelectorAll('th,td')).map(c => tidy(c.innerText || c.textContent))
     );
@@ -95,7 +101,7 @@ DETAIL_JS = r"""
 
 #: "collapseCSE329" -> "CSE329". Case-sensitive on purpose: with IGNORECASE the
 #: letter run greedily swallows the tail of "collapse" and yields "SECSE329".
-DETAIL_ID = re.compile(r"([A-Z]{2,5}\s?\d{3,4}[A-Z]?)\s*$")
+DETAIL_ID = re.compile(r"([A-Z]{2,5}\s?\d{2,4}[A-Z]?)\s*$")
 
 PRESENT_WORDS = ("present", "p", "attended", "yes")
 ABSENT_WORDS = ("absent", "a", "no")
@@ -404,7 +410,7 @@ def validate_attendance(parsed: dict[str, Any]) -> tuple[bool, str]:
             aggregate["note"] = (
                 f"UMS reports {pct}% overall; counting classes attended gives "
                 f"{agg_attended}/{agg_delivered} = {computed}%. The difference is "
-                "usually duty leave, which UMS counts towards the overall figure."
+                "duty leave and the first-week bonus, which UMS adds to the overall figure."
             )
             return True, f"ok (UMS {pct}% vs counted {computed}%)"
 

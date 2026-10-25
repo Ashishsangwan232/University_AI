@@ -188,10 +188,11 @@ truthy("today_context spells the date out", today_context(TODAY)["today_readable
 # Caching must actually be configured, or every question re-opens the portal.
 from app.core.config import settings  # noqa: E402
 
-truthy("attendance is cached for at least 5 minutes", settings.ums_attendance_ttl_seconds >= 300)
-truthy("panels are cached for at least 5 minutes", settings.ums_panel_ttl_seconds >= 300)
-truthy("the name is cached for longer still",
-       settings.ums_profile_ttl_seconds >= settings.ums_panel_ttl_seconds)
+truthy("UMS data is served from memory for at least 5 minutes", settings.ums_cache_max_age_seconds >= 300)
+truthy("background re-reads are not more often than every 5 minutes",
+       settings.ums_refresh_after_seconds == 0 or settings.ums_refresh_after_seconds >= 300)
+truthy("cached data stays usable longer than the refresh interval",
+       settings.ums_cache_max_age_seconds >= settings.ums_refresh_after_seconds)
 
 # --------------------------------------------------------------------------
 # One tool registry, shared by every provider.

@@ -50,9 +50,10 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "description": (
             "Get the student's current attendance, read live from UMS: overall percentage and "
             "each course's attended/delivered classes. If 'note' is present, UMS's overall "
-            "percentage (which counts duty leave) differs from counted_percentage (classes "
-            "attended / delivered): give both and relay the note. Margins from "
-            "calculate_attendance use class counts, so they do not include duty leave. "
+            "percentage (which adds duty leave and the first-week bonus) differs from "
+            "counted_percentage (classes attended / delivered): give both and relay the note. "
+            "Margins from calculate_attendance use class counts, so they do not include duty "
+            "leave or the bonus. "
             "If UMS is not connected the response has available=false and a message "
             "explaining which step failed."
         ),
