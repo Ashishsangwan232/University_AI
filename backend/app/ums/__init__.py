@@ -1,0 +1,1 @@
+"""UMS browser integration package."""

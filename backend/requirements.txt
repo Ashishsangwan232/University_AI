@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+sqlalchemy
+psycopg[binary]
+google-genai
+
+beautifulsoup4
+requests
+playwright
+
+# Optional but recommended. The knowledge base stores its vectors either way -
+# numpy only makes a search compare the whole store at once instead of
+# reranking the top keyword matches.
+numpy
