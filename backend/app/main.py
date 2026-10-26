@@ -17,13 +17,14 @@ def _configure_logging() -> None:
     Nothing sensitive is ever logged: no username, password, OTP, cookie,
     session token, or authorization header is read by this application.
     """
-    logger = logging.getLogger("campusai.ums")
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
-        logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
+    for name in ("campusai.ums", "campusai.agent"):
+        logger = logging.getLogger(name)
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
+            logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
 
 
 @asynccontextmanager

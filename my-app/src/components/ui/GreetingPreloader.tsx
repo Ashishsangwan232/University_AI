@@ -1,6 +1,6 @@
 // Greeting preloader (from the reference snippet). The overlay's slide-up is
 // done with framer-motion instead of GSAP, so no extra library is needed.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 import { GREETINGS, type Greeting } from './greetings'
@@ -17,6 +17,10 @@ export function DynamicText({
 }: { greetings?: Greeting[]; intervalMs?: number; loop?: boolean; onComplete?: () => void; className?: string }) {
   const [index, setIndex] = useState(0)
   const [running, setRunning] = useState(true)
+  // Kept in a ref so a parent re-render (the app polls UMS every 3s) does not
+  // restart the timer and drag the greetings out.
+  const onCompleteRef = useRef(onComplete)
+  useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
 
   useEffect(() => {
     if (!running) return
@@ -27,12 +31,12 @@ export function DynamicText({
         if (loop) return 0
         clearInterval(timer)
         setRunning(false)
-        onComplete?.()
+        onCompleteRef.current?.()
         return previous
       })
     }, intervalMs)
     return () => clearInterval(timer)
-  }, [running, greetings, intervalMs, loop, onComplete])
+  }, [running, greetings, intervalMs, loop])
 
   return (
     <div className={`relative h-16 w-72 flex items-center justify-center overflow-visible ${className}`} aria-label="Greetings in different languages">
@@ -61,9 +65,25 @@ export function DynamicText({
  * - `loop`: keeps going while `active` is true, leaves when it turns false (UMS connecting).
  */
 export function GreetingPreloader({
-  active = true, loop = false, fullPage = true, intervalMs = 300, caption,
-}: { active?: boolean; loop?: boolean; fullPage?: boolean; intervalMs?: number; caption?: ReactNode }) {
-  const [finished, setFinished] = useState(false)
+  active = true, loop = false, fullPage = true, intervalMs = 300, caption, oncePerSession,
+}: {
+  active?: boolean
+  loop?: boolean
+  fullPage?: boolean
+  intervalMs?: number
+  caption?: ReactNode
+  /** Play only on the first load in this browser tab session (not on every refresh). */
+  oncePerSession?: string
+}) {
+  const [finished, setFinished] = useState(() => {
+    if (!oncePerSession) return false
+    try { return window.sessionStorage.getItem(oncePerSession) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    if (finished && oncePerSession) {
+      try { window.sessionStorage.setItem(oncePerSession, '1') } catch { /* not remembered */ }
+    }
+  }, [finished, oncePerSession])
   const visible = loop ? active : active && !finished
 
   return (

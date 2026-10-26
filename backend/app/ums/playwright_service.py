@@ -342,10 +342,18 @@ class UMSPlaywrightService:
             or (time.time() - snapshot["attendance_updated_at"]) > ttl
         )
         if stale and snapshot["browser_connected"] and snapshot["authenticated"]:
+            # Read attendance only - not a full Refresh, which would also mark
+            # every other item for re-reading and keep UMS busy for a minute.
+            def run() -> None:
+                # The background prefetch may have read it while this waited.
+                age = self._age("attendance")
+                if age is None or age > ttl:
+                    self._fetch_now("attendance")
+
             try:
-                self.refresh()
+                self._call(run, timeout=settings.ums_capture_timeout_seconds + 30)
             except Exception as exc:  # noqa: BLE001 - reported through diagnostics
-                log.info("[UMS] refresh during attendance() failed: %s", exc)
+                log.info("[UMS] reading attendance for a question failed: %s", exc)
             snapshot = self.status()
 
         if snapshot["attendance"] is None:

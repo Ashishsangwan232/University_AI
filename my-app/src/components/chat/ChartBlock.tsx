@@ -61,7 +61,7 @@ export default function ChartBlock({ spec }: { spec: ChartSpec }) {
     />
   )
   const target = typeof spec.target === 'number'
-    ? <ReferenceLine y={spec.target} stroke={LOW} strokeDasharray="5 4" label={{ value: `Target ${fmt(spec.target)}`, fill: LOW, fontSize: 11, position: 'insideTopRight' }} />
+    ? <ReferenceLine y={spec.target} stroke={LOW} strokeDasharray="5 4" strokeOpacity={0.8} />
     : null
   const single = series.length === 1
 
@@ -142,7 +142,13 @@ export default function ChartBlock({ spec }: { spec: ChartSpec }) {
 
   return (
     <figure className="chart-card">
-      {spec.title && <figcaption>{spec.title}</figcaption>}
+      {(spec.title || typeof spec.target === 'number') && (
+        <figcaption>
+          <span>{spec.title}</span>
+          {/* The target sits here, not on the line, so it never covers a bar. */}
+          {typeof spec.target === 'number' && <span className="chart-target">Target {fmt(spec.target)}</span>}
+        </figcaption>
+      )}
       <div className="chart-body">
         <ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer>
       </div>

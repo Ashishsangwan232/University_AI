@@ -15,6 +15,8 @@ add up percentages, or work out what day tomorrow is.
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -39,6 +41,8 @@ from app.tools.campus import (
 )
 from app.tools.student import get_student_profile_tool
 from app.ums.state import UMSLiveAttendanceUnavailable
+
+log = logging.getLogger("campusai.agent")
 
 NO_ARGS: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
@@ -309,9 +313,11 @@ SYSTEM_INSTRUCTION = (
     "Tool results also carry 'as_of': readings are cached for a few minutes so the student's "
     "browser is not driven around the portal for every question. When as_of is not 'just now', "
     "say the data is from that long ago instead of implying you checked this second. "
-    "You do not know the student's name unless get_student_profile tells you: call it before "
-    "addressing them by name, and if it reports available=false say the name could not be read "
-    "from UMS rather than guessing one. "
+    "Call only the tools the question needs - an attendance question needs get_attendance, "
+    "not the profile or the class log - so answers come back fast. Call get_student_profile "
+    "only when the student asks about their own details (name, registration number, hostel, "
+    "room, programme); do not call it just to greet them, and never guess a name. If it "
+    "reports available=false, say the detail could not be read from UMS. "
     "When summarising messages or notices, work only from what the tool returned, say how many "
     "you looked at, and name senders and dates exactly as given. "
     "Never ask for, repeat, or store UMS usernames, passwords, or OTPs. "
@@ -339,11 +345,16 @@ SYSTEM_INSTRUCTION = (
     "whole). For two series per item use keys like {\"label\":\"CSE329\",\"Attended\":20,"
     "\"Delivered\":22}. Every number in a chart must come straight from a tool result - never "
     "compute, estimate or invent one; use the 'percentage' fields tools give you. "
-    "When explaining a process, steps or a schedule (how to apply for leave, exam timeline, "
-    "re-evaluation), add a Mermaid diagram in a fenced block whose language is mermaid, e.g. "
-    "flowchart TD with short node labels in double quotes, or timeline. Keep diagrams small "
-    "(under 12 nodes). Use at most one chart and one diagram per answer, only when they add "
-    "something, and always still say the key facts in words. "
+    "For a step-by-step procedure (how to apply for hostel leave, re-evaluation, fee payment) "
+    "use a fenced block whose language is steps, containing only JSON like "
+    '{"title":"How to apply for hostel leave","steps":[{"title":"Open UMS","detail":"Sign in '
+    'at ums.lpu.in"},{"title":"Submit the form","detail":"Your warden then approves it"}]} - '
+    "3 to 7 steps, short titles, one-line details - and do NOT repeat the same steps as a "
+    "numbered list. Steps must come from get_university_info or another tool result: call it "
+    "first, and never invent UMS menu paths, button names, formats or rules. Use a Mermaid diagram (fenced block, language mermaid) only when the "
+    "process really branches, e.g. approved vs rejected: flowchart TD, at most 8 nodes, short "
+    "labels in double quotes. Use at most one visual of each kind per answer, only when it "
+    "adds something, and always still say the key facts in words. "
     "LANGUAGE: reply in the language AND script of the student's latest message - Hindi, "
     "Punjabi, Tamil or any other. If they write Hindi in English letters (Hinglish, e.g. 'bhai "
     "mera attendance kitna hai'), reply in Hinglish in English letters too, never in Devanagari. "
@@ -363,6 +374,16 @@ def _int(args: dict[str, Any], key: str, default: int) -> int:
 
 
 def execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session) -> dict[str, Any]:
+    """Run one tool and log how long it took, so a slow answer can be traced to
+    the tool that waited (usually a UMS page that was not cached yet)."""
+    started = time.perf_counter()
+    try:
+        return _execute_tool(name, args, student_id, db)
+    finally:
+        log.info("[agent] tool %s took %.1fs", name, time.perf_counter() - started)
+
+
+def _execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session) -> dict[str, Any]:
     """Run one tool. The same dispatcher for every provider.
 
     A UMS outage comes back as data the model can read out, not as an exception

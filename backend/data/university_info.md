@@ -109,6 +109,16 @@ Full academic year, in rupees. Free electricity units per year in brackets.
 - Fees for 2027-28 had not been published as of October 2026.
 Source: https://www.lpu.in/student-services/residence.php
 
+## Hostel leave application (how to apply)
+- Hostel leave is applied for in UMS, on the "Hostel Leave Application" page (UMS page frmStudentHostelLeaveApplicationTermWise.aspx). CampusAI can show your balance and check a draft but cannot submit for you.
+- Check your balance first: there are day leaves and night leaves, each with a total, used and remaining count for the term.
+- The form asks for five things: Leave Type (the types offered for your term), Start Date & Time of Leave, Leave Ending Date Time, Visit place, and Reason of Leaving.
+- Dates and times are entered as dd/mm/yyyy hh:mm (for example 31/10/2026 18:00).
+- Tick the acknowledgement box on the form, then press Submit.
+- The application goes to your recommending authority and then your sanctioning authority for approval; their names are shown on the leave page (ask CampusAI for your leave balance to see them).
+- Parents can be told about leave status and movement by SMS through the online leave system.
+Source: UMS Hostel Leave Application page and Prospectus 2026 Part C
+
 ## Mess, food, laundry and gym
 - University mess (vegetarian), per year: four meals 45,000; three meals 41,400; two meals 37,800; a-la-carte four meals 52,200. Plans run for up to 10 months.
 - Non-vegetarian mess is run by an outside vendor near campus and paid to them directly: three meals 75,000/year (7,500/month); two meals 65,000/year; one meal 55,000/year.

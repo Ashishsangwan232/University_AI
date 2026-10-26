@@ -1,6 +1,8 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react'
 import type { ChartSpec } from './ChartBlock'
 import { MermaidBlock } from './MermaidBlock'
+import { StepsBlock } from './StepsBlock'
+import { parseSteps } from './stepsSpec'
 import { LoaderGooeyBlobs } from '../ui/LoaderGooeyBlobs'
 
 // Recharts only loads when an answer actually contains a chart.
@@ -72,6 +74,19 @@ export function AIMessage({ text }: Props) {
   let codeLang = ''
   let inCode = false
   let tableLines: string[] = []
+  let quoteLines: string[] = []
+
+  const flushQuote = () => {
+    if (!quoteLines.length) return
+    const text = quoteLines.filter(l => l.trim())
+    quoteLines = []
+    if (!text.length) return
+    blocks.push(
+      <blockquote key={`quote-${blocks.length}`}>
+        {text.map((l, i) => <p key={i}>{inline(l)}</p>)}
+      </blockquote>,
+    )
+  }
 
   const flushTable = () => {
     const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())
@@ -111,6 +126,8 @@ export function AIMessage({ text }: Props) {
           </Suspense>
         </ChartBoundary>,
       )
+    } else if (codeLang === 'steps' && parseSteps(source)) {
+      blocks.push(<StepsBlock key={key} spec={parseSteps(source)!} renderInline={inline} />)
     } else if (codeLang === 'mermaid') {
       blocks.push(<MermaidBlock key={key} code={source} />)
     } else {
@@ -160,10 +177,26 @@ export function AIMessage({ text }: Props) {
 
     flushList()
 
-    const heading = line.match(/^(#{1,3})\s+(.+)$/)
+    // "> note" lines: consecutive ones make one quote block.
+    const quote = line.match(/^\s*>\s?(.*)$/)
+    if (quote) {
+      quoteLines.push(quote[1])
+      const next = lines[index + 1]
+      if (next === undefined || !/^\s*>/.test(next)) flushQuote()
+      return
+    }
+
+    // --- / *** / ___ on their own: a divider.
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      blocks.push(<hr key={index} />)
+      return
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/)
     if (heading) {
-      const Tag = heading[1].length === 1 ? 'h3' : heading[1].length === 2 ? 'h4' : 'h5'
-      blocks.push(<Tag key={index}>{inline(heading[2])}</Tag>)
+      const level = heading[1].length
+      const Tag = level === 1 ? 'h3' : level === 2 ? 'h4' : 'h5'
+      blocks.push(<Tag key={index}>{inline(heading[2].replace(/\s+#+\s*$/, ''))}</Tag>)
       return
     }
 
@@ -173,6 +206,7 @@ export function AIMessage({ text }: Props) {
   })
 
   flushList()
+  flushQuote()
   if (inCode) flushCode()
   return <div className="ai-message">{blocks}</div>
 }

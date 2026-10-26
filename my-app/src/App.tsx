@@ -197,7 +197,7 @@ function App() {
   return (
     <div className={`app ${sidebarOpen ? 'with-sidebar' : ''}`}>
       {/* Start-up: greetings in many languages, then the overlay slides away. */}
-      <GreetingPreloader />
+      <GreetingPreloader oncePerSession="campusai.intro" />
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}

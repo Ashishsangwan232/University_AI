@@ -9,11 +9,40 @@ function loadMermaid(dark: boolean) {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid').then(module => {
       const mermaid = module.default
+      // Styled to match the app instead of Mermaid's stock grey boxes:
+      // soft dark/light nodes with a green border, curved thin arrows.
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: 'strict', // no scripts or click handlers from the model's text
-        theme: dark ? 'dark' : 'neutral',
+        theme: 'base',
         fontFamily: "'DM Sans', system-ui, sans-serif",
+        themeVariables: dark
+          ? {
+              darkMode: true,
+              background: 'transparent',
+              primaryColor: '#16241f',
+              primaryTextColor: '#ececec',
+              primaryBorderColor: '#34d399',
+              secondaryColor: '#1f1f1f',
+              tertiaryColor: '#141414',
+              lineColor: '#5b6b66',
+              textColor: '#ececec',
+              edgeLabelBackground: '#0b0b0b',
+              fontSize: '14px',
+            }
+          : {
+              background: 'transparent',
+              primaryColor: '#ecfdf5',
+              primaryTextColor: '#0d0d0d',
+              primaryBorderColor: '#10b981',
+              secondaryColor: '#f4f4f5',
+              tertiaryColor: '#fafafa',
+              lineColor: '#a1a1aa',
+              textColor: '#0d0d0d',
+              edgeLabelBackground: '#ffffff',
+              fontSize: '14px',
+            },
+        flowchart: { curve: 'basis', nodeSpacing: 28, rankSpacing: 34, padding: 10, useMaxWidth: true },
       })
       return mermaid
     })
