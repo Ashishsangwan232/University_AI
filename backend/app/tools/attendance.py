@@ -44,13 +44,27 @@ def _subject_from_course(item: dict[str, Any]) -> dict[str, Any] | None:
             stripped = match.group(2).strip() or name
         name = stripped
 
+    # UMS counts duty leave and the first-week bonus as present; so do we.
+    duty = int(item.get("duty_leave") or 0)
+    bonus = int(item.get("bonus") or 0)
+    present = min(attended + duty + bonus, total)
+    ums_pct = item.get("percentage")
+    try:
+        percentage = round(float(str(ums_pct).replace("%", "").strip()), 1)
+    except (TypeError, ValueError):
+        # Worked out here so a chart never depends on the model's arithmetic.
+        percentage = round(present / total * 100, 1)
+
     return {
         "name": name or code or "UMS course",
         "short": (code or "UMS").replace(" ", ""),
-        "attended": attended,
+        # Classes counted as present: attended + duty leave + first-week bonus.
+        "attended": present,
         "total": total,
-        # Worked out here so a chart never depends on the model's arithmetic.
-        "percentage": round(attended / total * 100, 1),
+        "attended_in_class": attended,
+        "duty_leave": duty,
+        "bonus": bonus,
+        "percentage": percentage,
         "teacher": "",
     }
 

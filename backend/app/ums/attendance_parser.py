@@ -235,8 +235,13 @@ def _map_columns(cells: list[str]) -> dict[str, int]:
             mapping.setdefault("course", idx)
         elif "delivered" in cell or "held" in cell or "conducted" in cell:
             mapping.setdefault("delivered", idx)
+        elif "duty" in cell:
+            # Duty leave counts as present in UMS's own Total Percentage.
+            mapping.setdefault("duty_leave", idx)
+        elif "bonus" in cell:
+            mapping.setdefault("bonus", idx)
         elif "attended" in cell or ("present" in cell and "percent" not in cell):
-            if "last" in cell or "duty" in cell:
+            if "last" in cell:
                 continue
             mapping.setdefault("attended", idx)
         elif "percent" in cell or cell in {"%", "%age"} or cell.endswith("%"):
@@ -301,6 +306,10 @@ def parse_attendance_rows(rows: list[list[str]]) -> dict[str, Any] | None:
         attended = to_count(cell("attended"), header_for("attended"))
         if delivered is None or attended is None:
             continue
+        # Duty leave and first-week bonus are classes UMS marks as present.
+        duty = (to_count(cell("duty_leave"), header_for("duty_leave")) or 0) if "duty_leave" in mapping else 0
+        bonus = (to_count(cell("bonus"), header_for("bonus")) or 0) if "bonus" in mapping else 0
+        present = attended + duty + bonus
 
         code = cell("code")
         name = cell("name")
@@ -319,6 +328,8 @@ def parse_attendance_rows(rows: list[list[str]]) -> dict[str, Any] | None:
                 aggregate = {
                     "delivered": delivered,
                     "attended": attended,
+                    "duty_leave": duty,
+                    "bonus": bonus,
                     "percentage": pct,
                 }
             continue
@@ -332,7 +343,9 @@ def parse_attendance_rows(rows: list[list[str]]) -> dict[str, Any] | None:
             "name": clean(name) or label,
             "delivered": delivered,
             "attended": attended,
-            "percentage": pct if pct is not None else round(attended / delivered * 100, 1),
+            "duty_leave": duty,
+            "bonus": bonus,
+            "percentage": pct if pct is not None else round(min(present, delivered) / delivered * 100, 1),
         })
 
     if not courses:
@@ -342,15 +355,18 @@ def parse_attendance_rows(rows: list[list[str]]) -> dict[str, Any] | None:
     if aggregate is None:
         delivered = sum(c["delivered"] for c in courses)
         attended = sum(c["attended"] for c in courses)
+        duty = sum(c.get("duty_leave", 0) for c in courses)
+        bonus = sum(c.get("bonus", 0) for c in courses)
         aggregate = {
             "delivered": delivered,
             "attended": attended,
-            "percentage": round(attended / delivered * 100, 1) if delivered else 0.0,
+            "duty_leave": duty,
+            "bonus": bonus,
+            "percentage": round(min(attended + duty + bonus, delivered) / delivered * 100, 1) if delivered else 0.0,
         }
     elif aggregate.get("percentage") is None and aggregate["delivered"]:
-        aggregate["percentage"] = round(
-            aggregate["attended"] / aggregate["delivered"] * 100, 1
-        )
+        present = aggregate["attended"] + aggregate.get("duty_leave", 0) + aggregate.get("bonus", 0)
+        aggregate["percentage"] = round(min(present, aggregate["delivered"]) / aggregate["delivered"] * 100, 1)
 
     return {
         "courses": courses,
@@ -400,17 +416,16 @@ def validate_attendance(parsed: dict[str, Any]) -> tuple[bool, str]:
 
     pct = aggregate.get("percentage")
     if pct is not None and agg_delivered:
-        computed = round(agg_attended / agg_delivered * 100, 1)
+        # Present = attended + duty leave + first-week bonus, as UMS counts it.
+        present = agg_attended + (aggregate.get("duty_leave") or 0) + (aggregate.get("bonus") or 0)
+        computed = round(min(present, agg_delivered) / agg_delivered * 100, 1)
         if abs(computed - pct) > 2.0:
             # Not a mis-parse: the counts above already matched the course rows.
-            # LPU's own aggregate counts duty leave as attended, while the
-            # attended column does not, so the two percentages legitimately
-            # differ. Keep both and say why, rather than rejecting real data.
+            # Keep both and say so, rather than rejecting real data.
             aggregate["counted_percentage"] = computed
             aggregate["note"] = (
-                f"UMS reports {pct}% overall; counting classes attended gives "
-                f"{agg_attended}/{agg_delivered} = {computed}%. The difference is "
-                "duty leave and the first-week bonus, which UMS adds to the overall figure."
+                f"UMS reports {pct}% overall; counting classes present (including duty "
+                f"leave) gives {present}/{agg_delivered} = {computed}%."
             )
             return True, f"ok (UMS {pct}% vs counted {computed}%)"
 

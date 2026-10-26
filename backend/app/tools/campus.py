@@ -248,8 +248,13 @@ def get_recent_announcements_tool(
     }
 
 
-def get_messages_tool(limit: int = 30, query: str | None = None) -> dict:
-    """Live UMS messages. There is no demo equivalent - this requires UMS."""
+def get_messages_tool(limit: int = 10, query: str | None = None, days: int | None = None) -> dict:
+    """The student's UMS messages from the full message store.
+
+    No query and no day range: the latest messages (cached by the background
+    reader). With a query: UMS searches subject and text of the WHOLE history.
+    With days: only messages from the last N days (paging back as needed).
+    """
     from app.services.schedule import today_context
 
     if not ums_is_live():
@@ -258,27 +263,50 @@ def get_messages_tool(limit: int = 30, query: str | None = None) -> dict:
             "Click Connect UMS.",
             {},
         )
-    live = ums_playwright.messages()
-    records = [
-        _stamped({
+    limit = max(1, min(int(limit or 10), 100))
+    days = max(1, min(int(days), 730)) if days else None
+    query = (query or "").strip() or None
+
+    latest = ums_playwright.messages()
+    if query or days or limit > len(latest.get("items") or []):
+        live = ums_playwright.search_messages(query or "", days=days, max_rows=max(limit, 20) if not days else 300)
+        searched = (
+            f"UMS searched the subject and text of all {latest.get('total_in_store') or 'your'} messages"
+            if query else "messages read from the UMS message store, newest first"
+        )
+    else:
+        live = latest
+        searched = "the latest messages from the UMS message store"
+
+    items = (live.get("items") or [])[:limit]
+    # Tool results reach the model cut at ~20k characters. Share that between
+    # the messages so a long list is never chopped off half-way (which also hid
+    # the totals): few messages keep long texts, many get shorter previews.
+    budget = max(240, min(4000, 13000 // max(1, len(items))))
+    records = []
+    for index, record in enumerate(items, start=1):
+        text = record.get("body") or ""
+        if len(text) > budget:
+            text = text[:budget].rstrip() + " … (shortened - full text in UMS)"
+        records.append(_stamped({
             "id": index,
             "title": record.get("title") or "(no subject)",
             "sender": record.get("sender") or "",
             "date": record.get("date") or "",
-            "text": record.get("body") or "",
+            "text": text,
             "attachments": record.get("attachments") or [],
-            "links": record.get("links") or [],
-        })
-        for index, record in enumerate(live["items"], start=1)
-    ]
-    if query:
-        records = [record for record in records if _matches(record, query)]
-    # UMS lists the inbox newest first, so "the last 5" is the first 5 here.
+            "links": (record.get("links") or [])[:3],
+        }))
+    # Summary first, messages last: if anything is ever cut, it is the tail.
     return {
-        "messages": records[:limit],
-        "total_in_inbox": len(live["items"]),
-        "total_matching": len(records),
+        "total_in_inbox": latest.get("total_in_store") or len(latest.get("items") or []),
+        # Only meaningful when something was searched or a day range was given.
+        **({"total_matching": live.get("total_matching", len(live.get("items") or []))} if (query or days) else {}),
+        "returned": len(records),
         "query": query or "",
+        "days": days,
+        "searched": searched,
+        "messages": records,
         "source": "UMS (live)",
         "live": True,
         "updated_at": live.get("updated_at"),

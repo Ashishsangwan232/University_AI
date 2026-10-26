@@ -52,12 +52,12 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "get_attendance",
         "description": (
-            "Get the student's current attendance, read live from UMS: overall percentage and "
-            "each course's attended/delivered classes. If 'note' is present, UMS's overall "
-            "percentage (which adds duty leave and the first-week bonus) differs from "
-            "counted_percentage (classes attended / delivered): give both and relay the note. "
-            "Margins from calculate_attendance use class counts, so they do not include duty "
-            "leave or the bonus. "
+            "Get the student's current attendance, read live from UMS: overall percentage and, "
+            "per course, attended / total. 'attended' already counts duty leave and the "
+            "first-week bonus as present, exactly like UMS's Total Percentage - use it (and "
+            "'percentage') as the student's attendance and for calculate_attendance. "
+            "attended_in_class and duty_leave are the breakdown; mention duty leave when it "
+            "helps (e.g. '20 attended + 2 duty leave = 22/22'). "
             "If UMS is not connected the response has available=false and a message "
             "explaining which step failed."
         ),
@@ -206,17 +206,25 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "get_messages",
         "description": (
-            "Get the student's UMS inbox messages, newest first, so limit=5 gives the last five. "
-            "Use this to summarise recent messages. Each carries a sender and a 'when' - the "
-            "date and time the backend parsed from the message - so give both. Requires an "
-            "authenticated UMS session and has no demo equivalent: if UMS is not connected, say "
-            "so and ask the student to click Connect UMS. Never invent messages or senders."
+            "Get the student's UMS messages from their FULL message store (often 1000+ "
+            "messages, not just the recent ones), newest first, so limit=5 gives the last five. "
+            "To find messages about something (a company, a test, a platform like Hitbullseye, "
+            "a deadline), pass query: UMS itself searches the subject AND text of every message "
+            "ever received. 'last N messages / msg' means limit=N (the N newest), NOT days; "
+            "only 'last N days / din / weeks / months / mahine' means days (e.g. 60 for two "
+            "months). When asked how many messages there are in total, give total_in_inbox. "
+            "Report total_matching and say how many you show; if more matched than you list, "
+            "say so - in plain words, never mention tools, APIs or field names. Each message has a 'when' (its date) - give it, and the sender "
+            "when there is one. A date inside the text is a deadline, not the message's date. "
+            "If UMS is not connected, say so and ask the student to click Connect UMS. Never "
+            "invent messages or senders."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "How many recent messages. Default 10."},
-                "query": {"type": "string", "description": "Words that must all appear."},
+                "limit": {"type": "integer", "description": "How many messages to return (max 100). Default 10."},
+                "query": {"type": "string", "description": "Search words, e.g. 'hitbullseye' or 'TATA ELXSI'."},
+                "days": {"type": "integer", "description": "Only messages from the last N days."},
             },
             "required": [],
         },
@@ -422,7 +430,9 @@ def _execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session)
             )
         if name == "get_messages":
             return get_messages_tool(
-                limit=_int(args, "limit", 10), query=(args.get("query") or None)
+                limit=_int(args, "limit", 10),
+                query=(args.get("query") or None),
+                days=(_int(args, "days", 0) or None),
             )
         if name == "get_hostel_leave_balance":
             return get_leave_tool()
@@ -444,6 +454,12 @@ def _execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session)
     except KeyError as exc:
         return {"available": False, "error": "missing_argument",
                 "message": f"The tool {name} needs {exc} and it was not provided."}
+    except Exception as exc:  # noqa: BLE001 - tell the model the truth, don't crash the answer
+        log.warning("[agent] tool %s failed: %s", name, exc)
+        return {"available": False, "error": "tool_failed",
+                "message": ("Reading this from UMS failed just now (UMS is still connected). "
+                            "Tell the student to ask again in a moment."),
+                "detail": str(exc)[:200]}
     return {"available": False, "error": "unknown_tool",
             "message": f"There is no tool called {name}."}
 

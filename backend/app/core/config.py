@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     ums_message_containers: str = "#MyMessage,#divMessage,#exampleModalRight .modal-body"
     ums_message_openers: str = "#MyMessageLink,[onclick*='getMyAllMessages']"
     ums_message_page: str = "frmStudentsMyMessages.aspx"
+    #: The page method UMS's "My Messages Repository" uses: the whole message
+    #: history, 20 per page, searchable by subject and text (done by UMS).
+    ums_message_store_method: str = "frmStudentsMyMessages.aspx/GetDataforMyMessages"
+    #: How many of the latest messages the background reader keeps.
+    ums_message_prefetch_rows: int = 60
+    #: Most pages (of 20) one search or "last N days" request may read.
+    ums_message_max_pages: int = 15
+    ums_message_search_ttl_seconds: int = 120
 
     #: Field selectors inside one card, tried in order. From the DOM inspect:
     #: announcements use .announcement-subject / .announcement-date / .panel-body,

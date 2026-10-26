@@ -51,6 +51,7 @@ from app.ums.panels import (
     validate_cards,
 )
 from app.ums.site_map import MAP_JS, build as build_site_map, is_action
+from app.ums.messages import STORE_JS as MESSAGE_STORE_JS, dedupe_messages, parse_rows as parse_message_rows, row_totals as message_totals
 from app.ums.leave import LEAVE_JS, LOCATE_JS, parse_leave, validate_leave
 from app.ums.leave_draft import format_for_ums
 from app.ums.profile import (
@@ -223,6 +224,8 @@ class UMSPlaywrightService:
         self._prefetch_current: str | None = None
         #: kind -> (failed at, message, consecutive failures)
         self._prefetch_errors: dict[str, tuple[float, str, int]] = {}
+        #: Recent searches of the message store, by query/days/size.
+        self._message_searches: dict[str, dict[str, Any]] = {}
         #: Refresh bumps the generation; an item read in an older generation is
         #: re-read in the background. A counter, not a clock, so it is exact.
         self._generation = 0
@@ -1159,8 +1162,156 @@ class UMSPlaywrightService:
         return self._get("announcements", force)
 
     def messages(self, force: bool = False) -> dict[str, Any]:
-        """Live messages from the authenticated UMS session."""
+        """The latest messages (newest first) from the student's UMS message store."""
         return self._get("messages", force)
+
+    def search_messages(self, query: str = "", days: int | None = None, max_rows: int = 100) -> dict[str, Any]:
+        """Search the student's WHOLE message history (not just the recent panel).
+
+        ``query`` is matched by UMS itself against subjects and message text;
+        ``days`` keeps only messages from the last N days. Cached briefly.
+        """
+        key = f"{query.strip().lower()}|{days}|{max_rows}"
+        cached = self._message_searches.get(key)
+        if cached and time.time() - cached["updated_at"] <= settings.ums_message_search_ttl_seconds:
+            return cached
+        status = self.status()
+        if not status["browser_connected"] or not status["authenticated"]:
+            raise UMSLiveAttendanceUnavailable(self._unavailable_reason(status), status["diagnostics"])
+        result = self._call(
+            lambda: self._search_messages(query.strip(), days, max_rows),
+            timeout=settings.ums_capture_timeout_seconds,
+        )
+        self._message_searches[key] = result
+        return result
+
+    # ------------------------------------------------------- message store
+    def _store_page(self, page: Page, page_index: int, subject: str, description: str) -> list[dict[str, Any]]:
+        url = settings.ums_url.rstrip("/") + "/" + settings.ums_message_store_method.lstrip("/")
+        args = {"url": url, "pageIndex": page_index, "subject": subject, "description": description}
+        try:
+            out = page.evaluate(MESSAGE_STORE_JS, args)
+        except Exception:  # noqa: BLE001 - page mid-navigation (another read moved it)
+            time.sleep(1.5)
+            page = self._pick_ums_page() or page
+            out = page.evaluate(MESSAGE_STORE_JS, args)
+        if not isinstance(out, dict) or out.get("status") != 200 or "rows" not in out:
+            raise UMSLiveAttendanceUnavailable(
+                f"The UMS message store did not answer (HTTP {out.get('status') if isinstance(out, dict) else '?'}).",
+                self.diagnostics(),
+            )
+        rows = out.get("rows")
+        return rows if isinstance(rows, list) else []
+
+    def _read_store(
+        self, subject: str, description: str, max_rows: int, since_iso: str | None
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Page through the store (newest first) until enough rows or too old."""
+        from app.services.schedule import parse_datetime
+
+        page = self._pick_ums_page()
+        if page is None:
+            raise UMSLiveAttendanceUnavailable(
+                f"No {settings.ums_host} tab is open in the CampusAI browser.", self.diagnostics()
+            )
+        records: list[dict[str, Any]] = []
+        total, pages = 0, 1
+        page_index = 1
+        while page_index <= settings.ums_message_max_pages:
+            rows = self._store_page(page, page_index, subject, description)
+            if page_index == 1:
+                total, pages = message_totals(rows)
+            batch = parse_message_rows(rows)
+            records.extend(batch)
+            if not batch or len(records) >= max_rows or page_index >= pages:
+                break
+            if since_iso:
+                oldest = parse_datetime(batch[-1]["date"])
+                if oldest and oldest["iso"] < since_iso:
+                    break
+            page_index += 1
+        return records, total
+
+    def _add_senders(self, records: list[dict[str, Any]]) -> None:
+        """The store has no sender; the dashboard panel does for recent messages."""
+        panel = self._panels.get("messages") or {}
+        senders = {
+            re.sub(r"\s+", " ", (item.get("title") or "")).strip().lower(): item.get("sender")
+            for item in panel.get("panel_items") or []
+            if item.get("sender")
+        }
+        for record in records:
+            if not record.get("sender"):
+                record["sender"] = senders.get(re.sub(r"\s+", " ", record["title"]).strip().lower(), "")
+
+    def _fetch_messages(self) -> dict[str, Any]:
+        """Prefetch: the latest messages from the store, senders from the panel."""
+        page = self._pick_ums_page()
+        panel_items: list[dict[str, Any]] = []
+        if page is not None:
+            try:  # the dashboard panel is already on screen: no clicks needed
+                panel_items = dedupe(self._read_containers(page, ["#MyMessage"], []))
+            except Exception:  # noqa: BLE001 - senders are a nice-to-have
+                panel_items = []
+        try:
+            records, total = self._read_store("", "", settings.ums_message_prefetch_rows, None)
+            records = dedupe_messages(records)
+        except Exception as exc:  # noqa: BLE001 - fall back to the old panel reading
+            log.info("[UMS] message store unavailable (%s); reading the dashboard panel", exc)
+            return self._capture_panel(
+                "messages",
+                settings.ums_message_containers_list,
+                settings.ums_message_openers_list,
+                settings.ums_message_page,
+            )
+        result = {
+            "available": True,
+            "kind": "messages",
+            "source": "UMS message store",
+            "count": len(records),
+            "items": records,
+            "total_in_store": total,
+            "panel_items": panel_items,
+            "updated_at": time.time(),
+        }
+        self._panels["messages"] = result
+        self._add_senders(records)
+        return result
+
+    def _search_messages(self, query: str, days: int | None, max_rows: int) -> dict[str, Any]:
+        from datetime import date, timedelta
+
+        from app.services.schedule import parse_datetime
+
+        since_iso = (date.today() - timedelta(days=days)).isoformat() if days else None
+        if query:
+            # UMS searches subject and text separately; ask both, merge.
+            by_subject, _ = self._read_store(query, "", max_rows, since_iso)
+            by_text, _ = self._read_store("", query, max_rows, since_iso)
+            records = dedupe_messages(by_subject + by_text)
+        else:
+            records, _ = self._read_store("", "", max_rows if not days else settings.ums_message_max_pages * 20, since_iso)
+            records = dedupe_messages(records)
+
+        def iso(record: dict[str, Any]) -> str:
+            stamp = parse_datetime(record.get("date"))
+            return stamp["iso"] if stamp else ""
+
+        if since_iso:
+            records = [r for r in records if iso(r) and iso(r) >= since_iso]
+        records.sort(key=iso, reverse=True)
+        self._add_senders(records)
+        cached = self._panels.get("messages") or {}
+        return {
+            "available": True,
+            "source": "UMS message store",
+            "items": records[:max_rows],
+            "total_matching": len(records),
+            "total_in_store": cached.get("total_in_store"),
+            "query": query,
+            "days": days,
+            "updated_at": time.time(),
+        }
 
     # ------------------------------------------------------- cache & prefetch
     #
@@ -1232,12 +1383,7 @@ class UMSPlaywrightService:
                 settings.ums_announcement_page,
             )
         elif kind == "messages":
-            result = self._capture_panel(
-                "messages",
-                settings.ums_message_containers_list,
-                settings.ums_message_openers_list,
-                settings.ums_message_page,
-            )
+            result = self._fetch_messages()
         else:
             raise ValueError(f"Unknown UMS item {kind!r}")
         self._panels[kind] = result
@@ -1303,6 +1449,7 @@ class UMSPlaywrightService:
             self._panels = {}
             self._prefetch_errors = {}
             self._item_generation = {}
+            self._message_searches = {}
 
     def inspect(
         self,
@@ -2265,6 +2412,7 @@ class UMSPlaywrightService:
             self._panels = {}
             self._prefetch_errors = {}
             self._item_generation = {}
+            self._message_searches = {}
             self._prefetch_current = None
             self._was_authenticated = False
             self._auto_capture_done = False
