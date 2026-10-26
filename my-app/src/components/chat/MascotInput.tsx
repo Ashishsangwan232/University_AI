@@ -1,6 +1,6 @@
 // Chat input bar with the robot mascot riding on top. Icons come from
 // lucide-react (UI) and react-icons (model logos); see AnimatedIcon for motion.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowUp, Check, ChevronDown, Languages, Mic, MicOff, Sparkles, Square } from 'lucide-react'
 import { RiGeminiFill, RiOpenaiFill } from 'react-icons/ri'
@@ -97,12 +97,19 @@ type Props = {
   placeholder?: string
   /** Which way the menu opens: up when docked at the bottom, down on the start screen. */
   menuPlacement?: 'up' | 'down'
+  /** Tells the start screen when the robot should leave its heading for the bar. */
+  onTypingChange?: (typing: boolean) => void
+  /** On the start screen the robot goes back to the heading instead of fading out. */
+  robotReturnsHome?: boolean
 }
+
+/** Shared by the start-screen robot and this bar's robot, so it is one robot that moves. */
+export const ROBOT_LAYOUT_ID = 'campusai-robot'
 
 export function MascotInput({
   onSubmit, onCancel, isProcessing, providers, provider, effort, language,
   onProviderChange, onEffortChange, onLanguageChange,
-  placeholder = 'Ask CampusAI', menuPlacement = 'up',
+  placeholder = 'Ask CampusAI', menuPlacement = 'up', onTypingChange, robotReturnsHome = false,
 }: Props) {
   const [prompt, setPrompt] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -189,16 +196,24 @@ export function MascotInput({
   const isTyping = prompt.length > 0 || isListening || isProcessing
   const emotion: Emotion = isProcessing ? 'thinking' : 'reading'
 
+  // Before paint, so the start screen's robot hides in the same frame this one appears.
+  useLayoutEffect(() => { onTypingChange?.(isTyping) }, [isTyping, onTypingChange])
+
   return (
     <div className="relative w-full">
-      {/* The robot rides on top of the bar while you type or it thinks. */}
+      {/* The robot rides on top of the bar while you type or it thinks. On the
+          start screen it is the same robot as the one above the heading
+          (shared layoutId), so it moves here instead of a second one appearing. */}
       <AnimatePresence>
         {isTyping && (
           <motion.div
             key="rider"
+            layoutId={ROBOT_LAYOUT_ID}
             initial={{ opacity: 0, y: 12, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.9 }}
+            // Going back to the heading: vanish at once and let the heading's
+            // robot (same layoutId) animate from here - never two at a time.
+            exit={robotReturnsHome ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 12, scale: 0.9 }}
             transition={{ type: 'spring', stiffness: 320, damping: 26 }}
             className="absolute -top-[74px] right-6 z-20 pointer-events-none"
           >
@@ -213,19 +228,16 @@ export function MascotInput({
             {...iconButtonMotion}
             type="button"
             onClick={() => setMenuOpen(open => !open)}
-            title="Model, reasoning effort and reply language"
-            className="flex items-center gap-1.5 h-10 px-3 rounded-full text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap"
+            // Only the model's icon and the effort show in the bar; the name and
+            // reply language are in this tooltip and in the menu.
+            title={`${selected.name} · ${level.label} effort${lang.id ? ` · replies in ${lang.label}` : ''}`}
+            aria-label={`Model: ${selected.name}, ${level.label} effort. Change model, effort or reply language`}
+            className="flex items-center gap-1.5 h-10 pl-2.5 pr-2 rounded-full text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <AnimatedIcon icon={selected.icon} size={16} motion="pop" className={selected.color} />
-            <span className="hidden sm:inline">{selected.name}</span>
+            <AnimatedIcon icon={selected.icon} size={17} motion="pop" className={selected.color} />
             <span className="text-[10px] font-mono uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300">
               {level.label}
             </span>
-            {lang.id && (
-              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                {lang.native.length <= 8 ? lang.native : lang.label}
-              </span>
-            )}
             <motion.span animate={{ rotate: menuOpen ? 180 : 0 }} style={{ display: 'inline-flex' }}>
               <ChevronDown size={13} className="text-zinc-500" />
             </motion.span>

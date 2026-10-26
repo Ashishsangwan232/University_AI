@@ -282,3 +282,6 @@ textarea:focus, textarea:focus-visible { outline: none; }
   .user-bubble { max-width: 85%; }
   .home-hero h1 { font-size: 24px; }
 }
+
+/* Start screen: keeps the robot's space while it is on the input bar. */
+.home-robot-slot { height: 78px; display: flex; align-items: flex-end; justify-content: center; }

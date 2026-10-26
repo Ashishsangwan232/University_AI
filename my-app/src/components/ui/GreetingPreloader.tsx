@@ -31,12 +31,17 @@ export function DynamicText({
         if (loop) return 0
         clearInterval(timer)
         setRunning(false)
-        onCompleteRef.current?.()
         return previous
       })
     }, intervalMs)
     return () => clearInterval(timer)
   }, [running, greetings, intervalMs, loop])
+
+  // Tell the parent after the render, not from inside a state update
+  // (React warns about updating another component while rendering).
+  useEffect(() => {
+    if (!running) onCompleteRef.current?.()
+  }, [running])
 
   return (
     <div className={`relative h-16 w-72 flex items-center justify-center overflow-visible ${className}`} aria-label="Greetings in different languages">

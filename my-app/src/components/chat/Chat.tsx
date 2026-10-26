@@ -8,7 +8,7 @@ import { iconButtonMotion } from '../ui/iconMotion'
 import { DynamicText, GreetingPreloader } from '../ui/GreetingPreloader'
 import { LoaderGooeyBlobs } from '../ui/LoaderGooeyBlobs'
 import { AIMessage } from './AIMessage'
-import { MascotInput, RobotMascot, type Effort } from './MascotInput'
+import { MascotInput, ROBOT_LAYOUT_ID, RobotMascot, type Effort } from './MascotInput'
 
 type Props = {
   messages: ChatMessage[]
@@ -159,6 +159,9 @@ export function Chat(props: Props) {
     onProviderChange, onEffortChange, onLanguageChange,
   } = props
   const bottomRef = useRef<HTMLDivElement>(null)
+  // While the student types on the start screen, the robot sits on the bar,
+  // so the heading's robot steps away (one robot, not two).
+  const [barHasRobot, setBarHasRobot] = useState(false)
 
   // A chat is "fresh" until the student has asked something.
   const fresh = !messages.some(m => m.role === 'user')
@@ -182,6 +185,8 @@ export function Chat(props: Props) {
       onEffortChange={onEffortChange}
       onLanguageChange={onLanguageChange}
       menuPlacement={fresh ? 'down' : 'up'}
+      onTypingChange={setBarHasRobot}
+      robotReturnsHome={fresh}
     />
   )
 
@@ -209,7 +214,21 @@ export function Chat(props: Props) {
         <div className="home">
           <div className="home-inner">
             <div className="home-hero">
-              <RobotMascot emotion={thinking ? 'thinking' : 'reading'} />
+              {/* Fixed-height slot: the heading stays put while the robot is on the bar. */}
+              <div className="home-robot-slot">
+                {/* No exit animation on purpose: it disappears in the same frame the
+                    bar's robot (same layoutId) appears, and that one animates from
+                    here - so there is only ever one robot on screen. */}
+                {!barHasRobot && (
+                  <motion.div
+                    key="hero-robot"
+                    layoutId={ROBOT_LAYOUT_ID}
+                    transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                  >
+                    <RobotMascot emotion={thinking ? 'thinking' : 'reading'} />
+                  </motion.div>
+                )}
+              </div>
               {/* Free time: a slow greeting in many languages. */}
               <DynamicText loop intervalMs={1800} className="home-greeting" />
               <h1>What can I help with?</h1>
