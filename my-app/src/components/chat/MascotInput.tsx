@@ -2,7 +2,7 @@
 // lucide-react (UI) and react-icons (model logos); see AnimatedIcon for motion.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, Check, ChevronDown, Languages, Mic, MicOff, Sparkles, Square } from 'lucide-react'
+import { ArrowUp, AudioLines, Check, ChevronDown, Languages, Mic, MicOff, Sparkles, Square } from 'lucide-react'
 import { RiGeminiFill, RiOpenaiFill } from 'react-icons/ri'
 import { SiOllama } from 'react-icons/si'
 import type { AgentProviders } from '../../api/campusApi'
@@ -10,6 +10,7 @@ import { AnimatedIcon } from '../ui/AnimatedIcon'
 import { iconButtonMotion } from '../ui/iconMotion'
 import { LANGUAGES } from './languages'
 import { RobotMascot, type Emotion } from './RobotMascot'
+import { speechRecognition, type SpeechRecognitionLike } from './speech'
 
 export { RobotMascot }
 
@@ -60,26 +61,6 @@ function modelOptions(providers: AgentProviders | null): ModelOption[] {
   }))]
 }
 
-// ------------------------------------------------------------ voice input
-type SpeechResultList = { length: number; [i: number]: { [j: number]: { transcript: string } } }
-type SpeechRecognitionLike = {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  onresult: ((event: { results: SpeechResultList }) => void) | null
-  onerror: ((event: { error: string }) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-type SpeechCtor = new () => SpeechRecognitionLike
-
-function speechRecognition(): SpeechCtor | null {
-  if (typeof window === 'undefined') return null
-  const w = window as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor }
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
-}
-
 // ------------------------------------------------------------------ input
 type Props = {
   onSubmit: (prompt: string) => void
@@ -101,6 +82,8 @@ type Props = {
   onTypingChange?: (typing: boolean) => void
   /** On the start screen the robot goes back to the heading instead of fading out. */
   robotReturnsHome?: boolean
+  /** Opens hands-free voice mode (shown in place of Send while the box is empty). */
+  onVoiceMode?: () => void
 }
 
 /** Shared by the start-screen robot and this bar's robot, so it is one robot that moves. */
@@ -109,7 +92,7 @@ export const ROBOT_LAYOUT_ID = 'campusai-robot'
 export function MascotInput({
   onSubmit, onCancel, isProcessing, providers, provider, effort, language,
   onProviderChange, onEffortChange, onLanguageChange,
-  placeholder = 'Ask CampusAI', menuPlacement = 'up', onTypingChange, robotReturnsHome = false,
+  placeholder = 'Ask CampusAI', menuPlacement = 'up', onTypingChange, robotReturnsHome = false, onVoiceMode,
 }: Props) {
   const [prompt, setPrompt] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -381,23 +364,37 @@ export function MascotInput({
           </motion.button>
         )}
 
-        <motion.button
-          {...iconButtonMotion}
-          type="button"
-          onClick={isProcessing ? onCancel : send}
-          disabled={!isProcessing && !prompt.trim()}
-          title={isProcessing ? 'Stop waiting for this answer' : 'Send'}
-          aria-label={isProcessing ? 'Stop waiting for this answer' : 'Send'}
-          className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-            isProcessing || prompt.trim()
-              ? 'bg-[#2f6fed] text-white hover:bg-[#2860d6]'
-              : 'bg-zinc-200 dark:bg-white/10 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
-          }`}
-        >
-          {isProcessing
-            ? <AnimatedIcon icon={Square} size={13} motion="pop" className="fill-current" />
-            : <AnimatedIcon icon={ArrowUp} size={18} motion="lift" strokeWidth={2.5} />}
-        </motion.button>
+        {!isProcessing && !prompt.trim() && !isListening && onVoiceMode && voiceSupported ? (
+          // Empty box: the blue button starts hands-free voice mode, like ChatGPT.
+          <motion.button
+            {...iconButtonMotion}
+            type="button"
+            onClick={onVoiceMode}
+            title="Voice mode - talk and hear the answer"
+            aria-label="Start voice mode"
+            className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors cursor-pointer bg-[#2f6fed] text-white hover:bg-[#2860d6]"
+          >
+            <AnimatedIcon icon={AudioLines} size={18} motion="wiggle" strokeWidth={2.3} />
+          </motion.button>
+        ) : (
+          <motion.button
+            {...iconButtonMotion}
+            type="button"
+            onClick={isProcessing ? onCancel : send}
+            disabled={!isProcessing && !prompt.trim()}
+            title={isProcessing ? 'Stop waiting for this answer' : 'Send'}
+            aria-label={isProcessing ? 'Stop waiting for this answer' : 'Send'}
+            className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+              isProcessing || prompt.trim()
+                ? 'bg-[#2f6fed] text-white hover:bg-[#2860d6]'
+                : 'bg-zinc-200 dark:bg-white/10 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
+            }`}
+          >
+            {isProcessing
+              ? <AnimatedIcon icon={Square} size={13} motion="pop" className="fill-current" />
+              : <AnimatedIcon icon={ArrowUp} size={18} motion="lift" strokeWidth={2.5} />}
+          </motion.button>
+        )}
       </div>
     </div>
   )

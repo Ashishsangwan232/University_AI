@@ -133,7 +133,7 @@ textarea:focus, textarea:focus-visible { outline: none; }
 .sidebar-scrim { display: none; }
 
 /* ------------------------------------------------------------------- main */
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
 .main-top { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px; flex: none; }
 .main-title { font-weight: 600; font-size: 17px; color: var(--ink); }
 .app.with-sidebar .main-title { visibility: hidden; }
@@ -285,3 +285,28 @@ textarea:focus, textarea:focus-visible { outline: none; }
 
 /* Start screen: keeps the robot's space while it is on the input bar. */
 .home-robot-slot { height: 78px; display: flex; align-items: flex-end; justify-content: center; }
+
+/* ------------------------------------------------------------- voice mode */
+.voice-overlay {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  padding: 48px 20px 36px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(10px);
+}
+.voice-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; width: min(640px, 100%); text-align: center; }
+.voice-robot { position: relative; display: grid; place-items: center; width: 220px; height: 200px; }
+.voice-ring { position: absolute; width: 150px; height: 150px; border-radius: 50%; border: 2px solid var(--ok); pointer-events: none; }
+.voice-ring.listening { border-color: #ef4444; }
+.voice-status { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 18px; min-height: 28px; }
+.voice-heard { margin: 0; font-size: 22px; line-height: 1.45; color: var(--ink); min-height: 64px; }
+.voice-heard.empty { color: var(--muted); font-size: 16px; }
+.voice-notice { margin: 0; color: #f43f5e; font-size: 14px; }
+.voice-controls { display: flex; gap: 18px; }
+.voice-btn {
+  width: 60px; height: 60px; border-radius: 50%; border: 0;
+  display: grid; place-items: center;
+  background: var(--active); color: var(--ink);
+}
+.voice-btn:hover:not(:disabled) { background: var(--hover); }
+.voice-btn.mic.live { background: #ef4444; color: #fff; box-shadow: 0 0 0 6px rgba(239, 68, 68, .18); }

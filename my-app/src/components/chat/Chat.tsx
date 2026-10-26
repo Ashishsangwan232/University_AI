@@ -8,7 +8,9 @@ import { iconButtonMotion } from '../ui/iconMotion'
 import { DynamicText, GreetingPreloader } from '../ui/GreetingPreloader'
 import { LoaderGooeyBlobs } from '../ui/LoaderGooeyBlobs'
 import { AIMessage } from './AIMessage'
+import { LANGUAGES } from './languages'
 import { MascotInput, ROBOT_LAYOUT_ID, RobotMascot, type Effort } from './MascotInput'
+import { VoiceMode } from './VoiceMode'
 
 type Props = {
   messages: ChatMessage[]
@@ -162,6 +164,9 @@ export function Chat(props: Props) {
   // While the student types on the start screen, the robot sits on the bar,
   // so the heading's robot steps away (one robot, not two).
   const [barHasRobot, setBarHasRobot] = useState(false)
+  const [voiceOpen, setVoiceOpen] = useState(false)
+  // Voice mode listens and speaks in the chosen reply language.
+  const speechLang = LANGUAGES.find(l => l.id === language)?.speech ?? ''
 
   // A chat is "fresh" until the student has asked something.
   const fresh = !messages.some(m => m.role === 'user')
@@ -187,11 +192,20 @@ export function Chat(props: Props) {
       menuPlacement={fresh ? 'down' : 'up'}
       onTypingChange={setBarHasRobot}
       robotReturnsHome={fresh}
+      onVoiceMode={() => setVoiceOpen(true)}
     />
   )
 
   return (
     <main className="main">
+      <VoiceMode
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        ask={ask}
+        thinking={thinking}
+        messages={messages}
+        speechLang={speechLang}
+      />
       {/* While UMS opens, the greeting preloader covers the chat area. */}
       <GreetingPreloader
         active={props.umsConnecting}
