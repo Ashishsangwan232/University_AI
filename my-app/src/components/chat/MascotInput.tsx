@@ -18,6 +18,12 @@ const GeminiIcon = ({ size = 16, className = '' }: IconProps) => (
   </svg>
 )
 
+const OpenAiIcon = ({ size = 16, className = '' }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" />
+  </svg>
+)
+
 export type Effort = 'low' | 'medium' | 'high'
 
 const LEVELS: { id: Effort; label: string; desc: string }[] = [
@@ -37,8 +43,8 @@ type ModelOption = {
 }
 
 function modelOptions(providers: AgentProviders | null): ModelOption[] {
-  const iconFor = (id: string) => (id === 'gemini' ? GeminiIcon : id === 'ollama' ? SiOllama : PiSparkleFill)
-  const colorFor = (id: string) => (id === 'gemini' ? 'text-blue-500' : id === 'ollama' ? 'text-zinc-700 dark:text-zinc-200' : 'text-emerald-500')
+  const iconFor = (id: string) => (id === 'gemini' ? GeminiIcon : id === 'ollama' ? SiOllama : id === 'openai' ? OpenAiIcon : PiSparkleFill)
+  const colorFor = (id: string) => (id === 'gemini' ? 'text-blue-500' : id === 'ollama' || id === 'openai' ? 'text-zinc-700 dark:text-zinc-200' : 'text-emerald-500')
   const auto: ModelOption = {
     id: '',
     name: 'Auto',
@@ -158,37 +164,26 @@ function speechRecognition(): SpeechCtor | null {
 export type MascotSubmit = { prompt: string; provider: string; effort: Effort }
 
 type Props = {
-  onSubmit: (data: MascotSubmit) => void
+  onSubmit: (prompt: string) => void
   onCancel: () => void
   isProcessing: boolean
   providers: AgentProviders | null
-  showWelcome: boolean
-  title: string
-  subtitle: string
+  /** Chosen model ('' = Auto) and effort. Held by the app so that suggestion
+   *  buttons can send with the same choice without going through this box. */
+  provider: string
+  effort: Effort
+  onProviderChange: (id: string) => void
+  onEffortChange: (effort: Effort) => void
   placeholder?: string
-  /** A suggestion chip was clicked: send it with the current model and effort. */
-  quickAsk?: { text: string; nonce: number } | null
   /** Which way the model menu opens: up when docked at the bottom, down on the start screen. */
   menuPlacement?: 'up' | 'down'
 }
 
-const EFFORT_KEY = 'campusai.effort'
-const MODEL_KEY = 'campusai.model'
-
-function remembered(key: string, fallback: string): string {
-  try { return window.localStorage.getItem(key) ?? fallback } catch { return fallback }
-}
-function remember(key: string, value: string) {
-  try { window.localStorage.setItem(key, value) } catch { /* private mode: not remembered */ }
-}
-
 export function MascotInput({
-  onSubmit, onCancel, isProcessing, providers, showWelcome, title, subtitle,
-  placeholder = 'Ask about attendance, classes, exams, hostel…', quickAsk, menuPlacement = 'up',
+  onSubmit, onCancel, isProcessing, providers, provider, effort, onProviderChange, onEffortChange,
+  placeholder = 'Ask CampusAI', menuPlacement = 'up',
 }: Props) {
   const [prompt, setPrompt] = useState('')
-  const [modelId, setModelId] = useState(() => remembered(MODEL_KEY, ''))
-  const [effort, setEffort] = useState<Effort>(() => remembered(EFFORT_KEY, 'medium') as Effort)
   const [menuOpen, setMenuOpen] = useState(false)
   const [isListening, setIsListening] = useState(false)
 
@@ -200,25 +195,20 @@ export function MascotInput({
   const voiceSupported = speechRecognition() !== null
 
   const options = modelOptions(providers)
-  const selected = options.find(o => o.id === modelId && o.available) ?? options[0]
+  const selected = options.find(o => o.id === provider && o.available) ?? options[0]
   const level = LEVELS.find(l => l.id === effort) ?? LEVELS[1]
 
-  // Latest choices, for sending a suggestion chip from an effect.
-  const choiceRef = useRef({ provider: selected.id, effort })
-  useEffect(() => { choiceRef.current = { provider: selected.id, effort } }, [selected.id, effort])
-
+  // Grow with the text, up to a limit - and re-measure when the width changes.
   useEffect(() => {
-    if (quickAsk) onSubmit({ prompt: quickAsk.text, ...choiceRef.current })
-    // Only when a new chip is clicked, not when onSubmit's identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickAsk])
-
-  // Grow with the text, up to a limit.
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.max(54, Math.min(el.scrollHeight, 260))}px`
+    const fit = () => {
+      const el = textareaRef.current
+      if (!el) return
+      el.style.height = 'auto'
+      el.style.height = `${Math.max(24, Math.min(el.scrollHeight, 200))}px`
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
   }, [prompt])
 
   useEffect(() => {
@@ -270,215 +260,176 @@ export function MascotInput({
     if (!text || isProcessing) return
     stopListening()
     setPrompt('')
-    onSubmit({ prompt: text, provider: selected.id, effort })
+    onSubmit(text)
   }
 
   const isTyping = prompt.length > 0 || isListening || isProcessing
   const emotion: Emotion = isProcessing ? 'thinking' : 'reading'
 
   return (
-    <div className="relative w-full flex flex-col items-center">
+    <div className="relative w-full">
+      {/* The robot rides on top of the bar while you type or it thinks. */}
       <AnimatePresence>
-        {showWelcome && !isTyping && (
-          <motion.div
-            key="welcome"
-            initial={{ opacity: 0, y: -6, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: 'auto' }}
-            exit={{ opacity: 0, y: -6, height: 0, transition: { duration: 0.22 } }}
-            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-4 flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-3.5 sm:gap-4.5 text-center sm:text-left select-none w-full"
-          >
-            <motion.div layoutId="robot-mascot" className="shrink-0">
-              <RobotMascot emotion="reading" isListening={isListening} />
-            </motion.div>
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-950 dark:text-white">{title}</h2>
-              <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 font-medium mt-0.5">{subtitle}</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <motion.div
-        className="relative w-full"
-        animate={{ paddingTop: isTyping ? 72 : 0 }}
-        transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-      >
         {isTyping && (
           <motion.div
-            layoutId="robot-mascot"
+            key="rider"
+            initial={{ opacity: 0, y: 12, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.9 }}
             transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-            className="absolute top-1 right-4 sm:right-6 z-20 pointer-events-none"
+            className="absolute -top-[74px] right-6 z-20 pointer-events-none"
           >
             <RobotMascot emotion={emotion} textLength={prompt.length} isListening={isListening} />
           </motion.div>
         )}
+      </AnimatePresence>
 
-        <div className="relative z-10 w-full p-4 sm:p-5 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.06)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.5)] transition-all duration-300 focus-within:border-zinc-400 dark:focus-within:border-white/25">
-          <textarea
-            ref={textareaRef}
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
-              }
-            }}
-            placeholder={isListening ? 'Listening… speak your question' : isProcessing ? 'Thinking…' : placeholder}
-            aria-label="Ask CampusAI"
-            autoFocus
-            className="w-full bg-transparent resize-none outline-hidden focus:outline-none font-medium text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed max-h-64 overflow-y-auto transition-[height] duration-150"
-            style={{ minHeight: '54px' }}
-          />
+      <div className="relative z-10 flex items-end gap-1.5 w-full pl-2 pr-2 py-2 rounded-[28px] bg-white dark:bg-[#262626] border border-zinc-200 dark:border-transparent shadow-[0_4px_20px_rgba(0,0,0,0.06)] dark:shadow-none">
+        <div ref={menuRef} className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setMenuOpen(open => !open)}
+            title="Model and reasoning effort"
+            className="flex items-center gap-1.5 h-10 px-3 rounded-full text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <selected.icon size={16} className={`${selected.color} shrink-0`} />
+            <span className="hidden sm:inline">{selected.name}</span>
+            <span className="text-[10px] font-mono uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300">
+              {level.label}
+            </span>
+            <PiCaretDownBold size={11} className={`text-zinc-500 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+          </button>
 
-          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between pt-3 border-t border-zinc-200/70 dark:border-white/5 gap-2 min-w-0">
-            <div ref={menuRef} className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => setMenuOpen(open => !open)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200/70 dark:hover:bg-white/10 text-xs font-semibold text-zinc-900 dark:text-zinc-100 transition-all cursor-pointer whitespace-nowrap"
+          <AnimatePresence>
+            {menuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: menuPlacement === 'up' ? 8 : -8, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: menuPlacement === 'up' ? 8 : -8, scale: 0.97 }}
+                transition={{ duration: 0.15 }}
+                className={`absolute ${menuPlacement === 'up' ? 'bottom-full mb-3' : 'top-full mt-3'} left-0 z-30 w-72 sm:w-80 p-2 rounded-2xl bg-white dark:bg-[#2f2f2f] border border-zinc-200 dark:border-white/10 shadow-[0_15px_40px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.6)]`}
               >
-                <selected.icon size={14} className={`${selected.color} shrink-0`} />
-                <span className="truncate max-w-32.5">{selected.name}</span>
-                <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono uppercase font-bold tracking-wider bg-zinc-200/70 dark:bg-white/10 text-zinc-700 dark:text-zinc-300">
-                  {level.label}
-                </span>
-                <PiCaretDownBold size={11} className={`text-zinc-500 dark:text-zinc-400 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              <AnimatePresence>
-                {menuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: menuPlacement === 'up' ? 8 : -8, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: menuPlacement === 'up' ? 8 : -8, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className={`absolute ${menuPlacement === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'} left-0 z-30 w-72 sm:w-80 p-2.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 shadow-[0_15px_40px_rgba(0,0,0,0.12)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.6)]`}
+                <div className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Model</div>
+                {options.map(option => (
+                  <button
+                    key={option.id || 'auto'}
+                    type="button"
+                    disabled={!option.available}
+                    onClick={() => onProviderChange(option.id)}
+                    className={`w-full flex items-center justify-between gap-2 p-2 rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      option.id === selected.id ? 'bg-zinc-100 dark:bg-white/10' : 'hover:bg-zinc-100/70 dark:hover:bg-white/5'
+                    }`}
                   >
-                    <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-bold">Model</div>
-                    <div className="space-y-0.5">
-                      {options.map(option => {
-                        const isSelected = option.id === selected.id
-                        return (
-                          <button
-                            key={option.id || 'auto'}
-                            type="button"
-                            disabled={!option.available}
-                            onClick={() => { setModelId(option.id); remember(MODEL_KEY, option.id) }}
-                            className={`w-full flex items-center justify-between p-2 rounded-xl text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isSelected
-                                ? 'bg-zinc-100 dark:bg-white/10 text-zinc-950 dark:text-white font-semibold'
-                                : 'hover:bg-zinc-100/70 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300'
-                            }`}
-                          >
-                            <span className="flex items-center gap-2.5 min-w-0">
-                              <option.icon size={16} className={`${option.color} shrink-0`} />
-                              <span className="text-left min-w-0">
-                                <span className="block font-semibold leading-tight">{option.name}</span>
-                                <span className="block text-[10px] text-zinc-500 dark:text-zinc-400 font-mono truncate">{option.detail}</span>
-                              </span>
-                            </span>
-                            {isSelected && <PiCheckBold size={13} className="text-emerald-500 shrink-0" />}
-                          </button>
-                        )
-                      })}
-                    </div>
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <option.icon size={16} className={`${option.color} shrink-0`} />
+                      <span className="text-left min-w-0">
+                        <span className="block font-medium text-zinc-900 dark:text-zinc-100 leading-tight">{option.name}</span>
+                        <span className="block text-[11px] text-zinc-500 dark:text-zinc-400 truncate">{option.detail}</span>
+                      </span>
+                    </span>
+                    {option.id === selected.id && <PiCheckBold size={14} className="text-zinc-900 dark:text-white shrink-0" />}
+                  </button>
+                ))}
 
-                    <div className="mt-2.5 pt-2.5 border-t border-zinc-200 dark:border-white/10">
-                      <div className="px-2 pb-1.5 flex items-center justify-between">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-bold">Reasoning effort</span>
-                        <span className="text-[10px] font-mono uppercase font-bold text-zinc-800 dark:text-zinc-200">{level.label}</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-white/5">
-                        {LEVELS.map(item => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => { setEffort(item.id); remember(EFFORT_KEY, item.id) }}
-                            className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                              item.id === effort
-                                ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs border border-zinc-200 dark:border-white/10'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/50 dark:hover:bg-white/5'
-                            }`}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="px-2 pt-1.5 text-[10px] text-zinc-600 dark:text-zinc-400 leading-tight">{level.desc}</div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <AnimatePresence>
-                {isListening && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.85, x: 6 }}
-                    animate={{ opacity: 1, scale: 1, x: 0 }}
-                    exit={{ opacity: 0, scale: 0.85, x: 6 }}
-                    transition={{ duration: 0.18 }}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/10 border border-red-500/25 shadow-[0_0_12px_rgba(239,68,68,0.25)] h-8"
-                    title="Listening"
-                  >
-                    {[
-                      { min: 4, max: 13, duration: 0.45 },
-                      { min: 6, max: 18, duration: 0.55 },
-                      { min: 8, max: 22, duration: 0.38 },
-                      { min: 5, max: 16, duration: 0.5 },
-                      { min: 4, max: 11, duration: 0.42 },
-                    ].map((bar, i) => (
-                      <motion.span
-                        key={i}
-                        className="w-1 bg-red-500 rounded-full"
-                        animate={{ height: [`${bar.min}px`, `${bar.max}px`, `${bar.min}px`], opacity: [0.7, 1, 0.7] }}
-                        transition={{ duration: bar.duration, repeat: Infinity, ease: 'easeInOut', delay: i * 0.08 }}
-                      />
+                <div className="mt-2 pt-2 border-t border-zinc-200 dark:border-white/10">
+                  <div className="px-2 pb-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">Reasoning effort</div>
+                  <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-white/5">
+                    {LEVELS.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => onEffortChange(item.id)}
+                        className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          item.id === effort
+                            ? 'bg-white dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-xs'
+                            : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
                     ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {voiceSupported && (
-                <button
-                  type="button"
-                  onClick={() => (isListening ? stopListening() : startListening())}
-                  disabled={isProcessing}
-                  title={isListening ? 'Stop voice input' : 'Speak your question'}
-                  aria-label={isListening ? 'Stop voice input' : 'Speak your question'}
-                  className={`p-2 rounded-xl transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isListening
-                      ? 'bg-red-500 text-white animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.5)]'
-                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5'
-                  }`}
-                >
-                  {isListening ? <PiMicrophoneFill size={16} /> : <PiMicrophoneBold size={16} />}
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={isProcessing ? onCancel : send}
-                disabled={!isProcessing && !prompt.trim()}
-                title={isProcessing ? 'Stop waiting for this answer' : 'Send'}
-                aria-label={isProcessing ? 'Stop waiting for this answer' : 'Send'}
-                className={`group w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer ${
-                  isProcessing
-                    ? 'bg-amber-400/20 dark:bg-amber-500/25 border border-amber-500/40 text-amber-500 hover:scale-105 active:scale-95 shadow-[0_0_14px_rgba(245,158,11,0.3)]'
-                    : prompt.trim()
-                      ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 hover:scale-105 active:scale-95 shadow-sm'
-                      : 'bg-zinc-200/60 dark:bg-white/5 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-                }`}
-              >
-                {isProcessing ? <PiStopFill size={14} /> : <PiArrowUpBold size={16} />}
-              </button>
-            </div>
-          </div>
+                  </div>
+                  <div className="px-2 pt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">{level.desc}</div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </motion.div>
+
+        <textarea
+          ref={textareaRef}
+          value={prompt}
+          rows={1}
+          onChange={e => setPrompt(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              send()
+            }
+          }}
+          placeholder={isListening ? 'Listening… speak your question' : isProcessing ? 'Thinking…' : placeholder}
+          aria-label="Ask CampusAI"
+          autoFocus
+          className="flex-1 min-w-0 self-center bg-transparent resize-none outline-none py-2 px-1 text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500 dark:placeholder:text-zinc-400 leading-6 max-h-[200px] overflow-y-auto"
+        />
+
+        <AnimatePresence>
+          {isListening && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85 }}
+              transition={{ duration: 0.18 }}
+              className="self-center flex items-center gap-1 px-2 h-8 rounded-full bg-red-500/10"
+              title="Listening"
+            >
+              {[
+                { min: 4, max: 13, duration: 0.45 },
+                { min: 6, max: 18, duration: 0.55 },
+                { min: 8, max: 20, duration: 0.38 },
+                { min: 5, max: 16, duration: 0.5 },
+              ].map((bar, i) => (
+                <motion.span
+                  key={i}
+                  className="w-1 bg-red-500 rounded-full"
+                  animate={{ height: [`${bar.min}px`, `${bar.max}px`, `${bar.min}px`] }}
+                  transition={{ duration: bar.duration, repeat: Infinity, ease: 'easeInOut', delay: i * 0.08 }}
+                />
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {voiceSupported && (
+          <button
+            type="button"
+            onClick={() => (isListening ? stopListening() : startListening())}
+            disabled={isProcessing}
+            title={isListening ? 'Stop voice input' : 'Speak your question'}
+            aria-label={isListening ? 'Stop voice input' : 'Speak your question'}
+            className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              isListening ? 'bg-red-500 text-white' : 'text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10'
+            }`}
+          >
+            {isListening ? <PiMicrophoneFill size={18} /> : <PiMicrophoneBold size={18} />}
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={isProcessing ? onCancel : send}
+          disabled={!isProcessing && !prompt.trim()}
+          title={isProcessing ? 'Stop waiting for this answer' : 'Send'}
+          aria-label={isProcessing ? 'Stop waiting for this answer' : 'Send'}
+          className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+            isProcessing || prompt.trim()
+              ? 'bg-[#2f6fed] text-white hover:bg-[#2860d6] active:scale-95'
+              : 'bg-zinc-200 dark:bg-white/10 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
+          }`}
+        >
+          {isProcessing ? <PiStopFill size={14} /> : <PiArrowUpBold size={17} />}
+        </button>
+      </div>
     </div>
   )
 }

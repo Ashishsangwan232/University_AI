@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = 120
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    #: OpenAI (Chat Completions). Shows up as a model once the key is set.
+    openai_api_key: str = ""
+    openai_model: str = "gpt-6-luna"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_timeout_seconds: int = 120
 
     # ------------------------------------------------------- chat memory
     #: Recent turns sent to the model verbatim, so follow-ups resolve.

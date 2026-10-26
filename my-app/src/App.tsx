@@ -7,15 +7,29 @@ import {
   type AgentProviders, type Conversation, type UMSSessionStatus,
 } from './api/campusApi'
 import { Chat } from './components/chat/Chat'
-import type { MascotSubmit } from './components/chat/MascotInput'
+import type { Effort } from './components/chat/MascotInput'
+import { Sidebar } from './components/layout/Sidebar'
 import { UMSBar } from './components/ums/UMSBar'
+
+function remembered(key: string, fallback: string): string {
+  try { return window.localStorage.getItem(key) ?? fallback } catch { return fallback }
+}
+function remember(key: string, value: string) {
+  try { window.localStorage.setItem(key, value) } catch { /* private mode: not remembered */ }
+}
+
+const isPhone = () => typeof window !== 'undefined' && window.innerWidth < 820
 
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [thinking, setThinking] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversationId, setConversationId] = useState('')
-  const [threadsOpen, setThreadsOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isPhone())
+  // Model ('' = Auto) and effort live here, so every way of sending - typing,
+  // a suggestion, "ask again" - uses the same choice.
+  const [provider, setProvider] = useState(() => remembered('campusai.model', ''))
+  const [effort, setEffort] = useState<Effort>(() => remembered('campusai.effort', 'medium') as Effort)
   // Lets the stop button abandon an answer that is still on its way.
   const abortRef = useRef<AbortController | null>(null)
   const [models, setModels] = useState<AgentProviders | null>(null)
@@ -29,10 +43,10 @@ function App() {
 
   useEffect(() => {
     void refreshConversations()
-    getAgentProviders().then(setModels).catch(() => { /* picker stays hidden */ })
+    getAgentProviders().then(setModels).catch(() => { /* menu shows Auto only */ })
   }, [refreshConversations])
 
-  // Keep the UMS bar current; the student signs in inside a separate window.
+  // Keep the UMS card current; the student signs in inside a separate window.
   useEffect(() => {
     let active = true
     const poll = async () => {
@@ -62,15 +76,13 @@ function App() {
     try {
       const thread = await getConversation(id)
       setConversationId(thread.id)
-      setMessages(thread.messages.length
-        ? thread.messages.map(message => ({
-            role: message.role === 'assistant' ? 'ai' as const : 'user' as const,
-            text: message.content,
-            source: message.source || undefined,
-            toolUsed: message.tool_used || undefined,
-            model: message.model ? `${message.provider} · ${message.model}` : undefined,
-          }))
-        : [])
+      setMessages(thread.messages.map(message => ({
+        role: message.role === 'assistant' ? 'ai' as const : 'user' as const,
+        text: message.content,
+        source: message.source || undefined,
+        toolUsed: message.tool_used || undefined,
+        model: message.model ? `${message.provider} · ${message.model}` : undefined,
+      })))
     } catch (reason) {
       setMessages(current => [...current, { role: 'ai', text: reason instanceof Error ? reason.message : 'That chat could not be opened.' }])
     }
@@ -88,10 +100,11 @@ function App() {
     } catch { /* leave it in the list if the delete failed */ }
   }
 
-  const ask = async ({ prompt, provider, effort }: MascotSubmit) => {
+  /** Send a question. `showQuestion` is false when re-asking the last one. */
+  const send = async (prompt: string, showQuestion = true) => {
     const clean = prompt.trim()
-    if (!clean) return
-    setMessages(current => [...current, { role: 'user', text: clean }])
+    if (!clean || thinking) return
+    if (showQuestion) setMessages(current => [...current, { role: 'user', text: clean }])
     setThinking(true)
     const controller = new AbortController()
     abortRef.current = controller
@@ -130,42 +143,52 @@ function App() {
     }
   }
 
-  const cancel = () => abortRef.current?.abort()
+  const retry = () => {
+    const lastQuestion = [...messages].reverse().find(m => m.role === 'user')
+    if (!lastQuestion || thinking) return
+    // Drop the last answer, then ask the same question again.
+    setMessages(current => (current.length && current[current.length - 1].role === 'ai' ? current.slice(0, -1) : current))
+    void send(lastQuestion.text, false)
+  }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <button className="menu-btn" aria-label="Show saved chats" onClick={() => setThreadsOpen(open => !open)}>☰</button>
-        <div className="brand"><span className="brand-mark">✦</span>CampusAI</div>
-        <button className="new-chat-btn" onClick={startNewChat} disabled={thinking}>+ New chat</button>
-      </header>
-
-      {backendDown ? (
-        <div className="ums-bar off"><span className="ums-dot" /><div className="ums-text"><strong>Backend not reachable</strong><span>Start FastAPI with: uvicorn app.main:app --reload</span></div></div>
-      ) : (
-        <UMSBar
-          status={umsStatus}
-          busy={umsBusy}
-          onConnect={() => umsAction(startUMSSession)}
-          onRefresh={() => umsAction(refreshUMS)}
-          onDisconnect={() => umsAction(stopUMSSession)}
-        />
-      )}
-
-      <Chat
-        messages={messages}
-        ask={ask}
-        cancel={cancel}
-        thinking={thinking}
-        providers={models}
+    <div className={`app ${sidebarOpen ? 'with-sidebar' : ''}`}>
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        ums={(
+          <UMSBar
+            status={umsStatus}
+            backendDown={backendDown}
+            busy={umsBusy}
+            onConnect={() => umsAction(startUMSSession)}
+            onRefresh={() => umsAction(refreshUMS)}
+            onDisconnect={() => umsAction(stopUMSSession)}
+          />
+        )}
         conversations={conversations}
         conversationId={conversationId}
+        busy={thinking}
         onNewChat={startNewChat}
         onOpenChat={openChat}
         onRenameChat={renameChat}
         onDeleteChat={removeChat}
-        threadsOpen={threadsOpen}
-        closeThreads={() => setThreadsOpen(false)}
+      />
+      {sidebarOpen && <button className="sidebar-scrim" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} />}
+
+      <Chat
+        messages={messages}
+        ask={prompt => void send(prompt)}
+        retry={retry}
+        cancel={() => abortRef.current?.abort()}
+        thinking={thinking}
+        providers={models}
+        provider={provider}
+        effort={effort}
+        onProviderChange={id => { setProvider(id); remember('campusai.model', id) }}
+        onEffortChange={level => { setEffort(level); remember('campusai.effort', level) }}
+        sidebarOpen={sidebarOpen}
+        openSidebar={() => setSidebarOpen(true)}
       />
     </div>
   )

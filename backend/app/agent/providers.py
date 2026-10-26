@@ -25,12 +25,18 @@ from sqlalchemy.orm import Session
 
 from app.agent.gemini_service import GeminiAgent
 from app.agent.ollama_service import OllamaAgent
+from app.agent.openai_service import OpenAIAgent
 from app.core.config import settings
 
 log = logging.getLogger("campusai.agent")
 
-AGENTS = {"ollama": OllamaAgent, "gemini": GeminiAgent}
-LABELS = {"ollama": "Ollama Cloud", "gemini": "Google Gemini"}
+AGENTS = {"ollama": OllamaAgent, "gemini": GeminiAgent, "openai": OpenAIAgent}
+LABELS = {"ollama": "Ollama Cloud", "gemini": "Google Gemini", "openai": "OpenAI"}
+MODELS = {
+    "ollama": lambda: settings.ollama_model,
+    "gemini": lambda: settings.gemini_model,
+    "openai": lambda: settings.openai_model,
+}
 
 
 def _tidy(answer: str) -> str:
@@ -49,7 +55,7 @@ def describe() -> dict[str, Any]:
             {
                 "id": name,
                 "label": LABELS[name],
-                "model": settings.ollama_model if name == "ollama" else settings.gemini_model,
+                "model": MODELS[name](),
                 "available": AGENTS[name].available(),
                 "reason": "" if AGENTS[name].available() else _why_unavailable(name),
             }
@@ -61,6 +67,8 @@ def describe() -> dict[str, Any]:
 def _why_unavailable(name: str) -> str:
     if name == "ollama":
         return "Set OLLAMA_API_KEY in .env (get one from ollama.com), or point OLLAMA_BASE_URL at a local Ollama."
+    if name == "openai":
+        return "Set OPENAI_API_KEY in .env."
     return "Set GEMINI_API_KEY in .env."
 
 
