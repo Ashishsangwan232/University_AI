@@ -103,6 +103,7 @@ def ask(
     requested: str | None = None,
     conversation_id: str | None = None,
     effort: str | None = None,
+    language: str | None = None,
 ) -> dict[str, Any]:
     """Answer with the best model that will actually respond.
 
@@ -116,6 +117,12 @@ def ask(
     conversation = memory.ensure_conversation(db, conversation_id, student_id, message)
     history, _ = memory.build_context(db, conversation)
     context = memory.system_context(conversation, history)
+    if language:
+        # Chosen in the menu: this beats matching the student's own language.
+        context = (
+            f"{context}\n\nReply language chosen by the student: {language}. Write the whole "
+            f"answer in {language}, keeping course codes, numbers, dates, names and URLs as given."
+        ).strip()
 
     for name in order(requested):
         agent_class = AGENTS[name]

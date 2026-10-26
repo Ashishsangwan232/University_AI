@@ -10,6 +10,7 @@ import { Chat } from './components/chat/Chat'
 import type { Effort } from './components/chat/MascotInput'
 import { Sidebar } from './components/layout/Sidebar'
 import { UMSBar } from './components/ums/UMSBar'
+import { GreetingPreloader } from './components/ui/GreetingPreloader'
 
 function remembered(key: string, fallback: string): string {
   try { return window.localStorage.getItem(key) ?? fallback } catch { return fallback }
@@ -30,6 +31,9 @@ function App() {
   // a suggestion, "ask again" - uses the same choice.
   const [provider, setProvider] = useState(() => remembered('campusai.model', ''))
   const [effort, setEffort] = useState<Effort>(() => remembered('campusai.effort', 'medium') as Effort)
+  // '' = reply in whatever language the student writes in.
+  const [language, setLanguage] = useState(() => remembered('campusai.language', ''))
+  const [umsConnecting, setUmsConnecting] = useState(false)
   // Lets the stop button abandon an answer that is still on its way.
   const abortRef = useRef<AbortController | null>(null)
   const [models, setModels] = useState<AgentProviders | null>(null)
@@ -67,6 +71,15 @@ function App() {
     try { setUmsStatus(await action()) } catch { /* the next poll shows the real state */ } finally { setUmsBusy(false) }
   }
 
+  // Connecting opens a browser window, which takes a few seconds: show the
+  // greeting preloader meanwhile (at least one full round of greetings).
+  const connectUms = async () => {
+    setUmsConnecting(true)
+    const minimum = new Promise(resolve => window.setTimeout(resolve, 2400))
+    await Promise.all([umsAction(startUMSSession), minimum])
+    setUmsConnecting(false)
+  }
+
   const startNewChat = () => {
     setConversationId('')
     setMessages([])
@@ -87,6 +100,35 @@ function App() {
       setMessages(current => [...current, { role: 'ai', text: reason instanceof Error ? reason.message : 'That chat could not be opened.' }])
     }
   }
+
+  // Keep the open chat in the address bar, so a refresh reopens it instead of
+  // starting a new chat.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (conversationId) url.searchParams.set('chat', conversationId)
+    else url.searchParams.delete('chat')
+    window.history.replaceState(null, '', url)
+  }, [conversationId])
+
+  // Read before the effect above rewrites the address.
+  const [chatToRestore] = useState(() => new URL(window.location.href).searchParams.get('chat'))
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current || !chatToRestore) return
+    restoredRef.current = true
+    getConversation(chatToRestore)
+      .then(thread => {
+        setConversationId(thread.id)
+        setMessages(thread.messages.map(message => ({
+          role: message.role === 'assistant' ? 'ai' as const : 'user' as const,
+          text: message.content,
+          source: message.source || undefined,
+          toolUsed: message.tool_used || undefined,
+          model: message.model ? `${message.provider} · ${message.model}` : undefined,
+        })))
+      })
+      .catch(() => setConversationId('')) // deleted or unknown: start fresh
+  }, [chatToRestore])
 
   const renameChat = async (id: string, title: string) => {
     try { await renameConversation(id, title); await refreshConversations() } catch { /* cosmetic */ }
@@ -113,6 +155,7 @@ function App() {
         provider: provider || undefined,
         conversationId: conversationId || undefined,
         effort,
+        language: language || undefined,
         signal: controller.signal,
       })
       if (response.conversation_id && response.conversation_id !== conversationId) setConversationId(response.conversation_id)
@@ -153,6 +196,8 @@ function App() {
 
   return (
     <div className={`app ${sidebarOpen ? 'with-sidebar' : ''}`}>
+      {/* Start-up: greetings in many languages, then the overlay slides away. */}
+      <GreetingPreloader />
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -161,7 +206,7 @@ function App() {
             status={umsStatus}
             backendDown={backendDown}
             busy={umsBusy}
-            onConnect={() => umsAction(startUMSSession)}
+            onConnect={() => void connectUms()}
             onRefresh={() => umsAction(refreshUMS)}
             onDisconnect={() => umsAction(stopUMSSession)}
           />
@@ -187,6 +232,9 @@ function App() {
         effort={effort}
         onProviderChange={id => { setProvider(id); remember('campusai.model', id) }}
         onEffortChange={level => { setEffort(level); remember('campusai.effort', level) }}
+        language={language}
+        onLanguageChange={lang => { setLanguage(lang); remember('campusai.language', lang) }}
+        umsConnecting={umsConnecting}
         sidebarOpen={sidebarOpen}
         openSidebar={() => setSidebarOpen(true)}
       />

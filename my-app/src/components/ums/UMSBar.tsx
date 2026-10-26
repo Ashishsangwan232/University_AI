@@ -1,4 +1,8 @@
+import { motion } from 'framer-motion'
+import { Plug, RefreshCw, ServerOff, Unplug } from 'lucide-react'
 import type { UMSPrefetch, UMSSessionStatus } from '../../api/campusApi'
+import { AnimatedIcon } from '../ui/AnimatedIcon'
+import { iconButtonMotion } from '../ui/iconMotion'
 
 type Props = {
   status: UMSSessionStatus | null
@@ -30,7 +34,7 @@ export function UMSBar({ status, backendDown, busy, onConnect, onRefresh, onDisc
   if (backendDown) {
     return (
       <div className="ums-card off">
-        <div className="ums-line"><span className="ums-dot" /><strong>Backend not reachable</strong></div>
+        <div className="ums-line"><ServerOff size={14} className="text-rose-500" /><strong>Backend not reachable</strong></div>
         <p className="ums-hint">Start it with: uvicorn app.main:app --reload</p>
       </div>
     )
@@ -73,13 +77,21 @@ export function UMSBar({ status, backendDown, busy, onConnect, onRefresh, onDisc
       <div className="ums-actions">
         {connected ? (
           <>
-            <button onClick={onRefresh} disabled={busy}>Refresh</button>
-            <button onClick={onDisconnect} disabled={busy}>Disconnect</button>
+            <motion.button {...iconButtonMotion} onClick={onRefresh} disabled={busy}>
+              {busy
+                ? <motion.span animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: 'linear' }} style={{ display: 'inline-flex' }}><RefreshCw size={13} /></motion.span>
+                : <AnimatedIcon icon={RefreshCw} size={13} motion="spin" />}
+              Refresh
+            </motion.button>
+            <motion.button {...iconButtonMotion} onClick={onDisconnect} disabled={busy}>
+              <AnimatedIcon icon={Unplug} size={13} motion="shake" /> Disconnect
+            </motion.button>
           </>
         ) : (
-          <button className="primary" onClick={onConnect} disabled={busy}>
+          <motion.button {...iconButtonMotion} className="primary" onClick={onConnect} disabled={busy}>
+            <AnimatedIcon icon={Plug} size={13} motion="wiggle" />
             {busy ? 'Opening…' : waiting ? 'Show UMS window' : 'Connect UMS'}
-          </button>
+          </motion.button>
         )}
       </div>
     </div>

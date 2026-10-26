@@ -1,4 +1,29 @@
-import type { ReactNode } from 'react'
+import { Component, lazy, Suspense, type ReactNode } from 'react'
+import type { ChartSpec } from './ChartBlock'
+import { MermaidBlock } from './MermaidBlock'
+import { LoaderGooeyBlobs } from '../ui/LoaderGooeyBlobs'
+
+// Recharts only loads when an answer actually contains a chart.
+const ChartBlock = lazy(() => import('./ChartBlock'))
+
+/** A chart that throws while drawing falls back to its source, not a blank answer. */
+class ChartBoundary extends Component<{ source: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() {
+    return this.state.failed ? <pre><code>{this.props.source}</code></pre> : this.props.children
+  }
+}
+
+function parseChart(source: string): ChartSpec | null {
+  try {
+    const spec = JSON.parse(source) as ChartSpec
+    if (!Array.isArray(spec.data) || !spec.data.length) return null
+    return spec
+  } catch {
+    return null
+  }
+}
 
 type Props = { text: string }
 
@@ -44,6 +69,7 @@ export function AIMessage({ text }: Props) {
   let listType: 'ul' | 'ol' | null = null
   let listItems: ReactNode[] = []
   let codeLines: string[] = []
+  let codeLang = ''
   let inCode = false
   let tableLines: string[] = []
 
@@ -74,18 +100,34 @@ export function AIMessage({ text }: Props) {
 
   const flushCode = () => {
     if (!codeLines.length) return
-    blocks.push(
-      <pre key={`code-${blocks.length}`}><code>{codeLines.join('\n')}</code></pre>,
-    )
+    const source = codeLines.join('\n')
+    const key = `code-${blocks.length}`
+    const spec = codeLang === 'chart' ? parseChart(source) : null
+    if (spec) {
+      blocks.push(
+        <ChartBoundary key={key} source={source}>
+          <Suspense fallback={<div className="chart-card loading"><LoaderGooeyBlobs size={8} color="var(--muted)" /></div>}>
+            <ChartBlock spec={spec} />
+          </Suspense>
+        </ChartBoundary>,
+      )
+    } else if (codeLang === 'mermaid') {
+      blocks.push(<MermaidBlock key={key} code={source} />)
+    } else {
+      blocks.push(<pre key={key}><code>{source}</code></pre>)
+    }
     codeLines = []
+    codeLang = ''
   }
 
   lines.forEach((line, index) => {
-    if (/^\s*```/.test(line)) {
+    const fence = line.match(/^\s*```\s*([\w-]*)/)
+    if (fence) {
       if (inCode) flushCode()
       else {
         flushList()
         codeLines = []
+        codeLang = fence[1].toLowerCase()
       }
       inCode = !inCode
       return

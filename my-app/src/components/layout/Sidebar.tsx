@@ -1,6 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { PiMagnifyingGlass, PiNotePencil, PiPencilSimple, PiSidebarSimple, PiTrash } from 'react-icons/pi'
+import { motion } from 'framer-motion'
+import { PanelLeftClose, Pencil, Search, SquarePen, Trash2 } from 'lucide-react'
 import type { Conversation } from '../../api/campusApi'
+import { AnimatedIcon } from '../ui/AnimatedIcon'
+import { iconButtonMotion } from '../ui/iconMotion'
+import { BrandMark } from '../ui/BrandMark'
 
 type Props = {
   open: boolean
@@ -40,21 +44,21 @@ export function Sidebar({
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`}>
       <div className="sidebar-top">
-        <div className="brand"><span className="brand-mark">✦</span>CampusAI</div>
-        <button className="icon-btn" title="Close sidebar" aria-label="Close sidebar" onClick={onClose}>
-          <PiSidebarSimple size={20} />
-        </button>
+        <div className="brand"><BrandMark />CampusAI</div>
+        <motion.button {...iconButtonMotion} className="icon-btn" title="Close sidebar" aria-label="Close sidebar" onClick={onClose}>
+          <AnimatedIcon icon={PanelLeftClose} motion="nudge" size={19} />
+        </motion.button>
       </div>
 
       {ums}
 
       <nav className="sidebar-nav">
-        <button className="nav-item" onClick={() => { onNewChat(); closeOnPhone() }} disabled={busy}>
-          <PiNotePencil size={18} /> New chat
-        </button>
-        <button className={`nav-item ${searching ? 'active' : ''}`} onClick={() => { setSearching(s => !s); setQuery('') }}>
-          <PiMagnifyingGlass size={18} /> Search chats
-        </button>
+        <motion.button {...iconButtonMotion} className="nav-item" onClick={() => { onNewChat(); closeOnPhone() }} disabled={busy}>
+          <AnimatedIcon icon={SquarePen} motion="wiggle" size={17} /> New chat
+        </motion.button>
+        <motion.button {...iconButtonMotion} className={`nav-item ${searching ? 'active' : ''}`} onClick={() => { setSearching(s => !s); setQuery('') }}>
+          <AnimatedIcon icon={Search} motion="pop" size={17} /> Search chats
+        </motion.button>
         {searching && (
           <input
             className="sidebar-search"
@@ -92,12 +96,12 @@ export function Sidebar({
               </button>
             )}
             <span className="thread-actions">
-              <button title="Rename" aria-label="Rename chat" onClick={() => { setRenaming(thread.id); setDraftTitle(thread.title) }}>
-                <PiPencilSimple size={15} />
-              </button>
-              <button title="Delete" aria-label="Delete chat" onClick={() => onDeleteChat(thread.id)}>
-                <PiTrash size={15} />
-              </button>
+              <motion.button {...iconButtonMotion} title="Rename" aria-label="Rename chat" onClick={() => { setRenaming(thread.id); setDraftTitle(thread.title) }}>
+                <AnimatedIcon icon={Pencil} motion="wiggle" size={14} />
+              </motion.button>
+              <motion.button {...iconButtonMotion} title="Delete" aria-label="Delete chat" onClick={() => onDeleteChat(thread.id)}>
+                <AnimatedIcon icon={Trash2} motion="shake" size={14} />
+              </motion.button>
             </span>
           </div>
         ))}

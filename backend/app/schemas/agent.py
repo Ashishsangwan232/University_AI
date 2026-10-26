@@ -14,6 +14,9 @@ class AgentChatRequest(BaseModel):
     #: How hard the model should think: "low", "medium" or "high". Omit for
     #: the model's default. Higher is slower but more careful.
     effort: Literal["low", "medium", "high"] | None = None
+    #: Reply language chosen in the menu, e.g. "Hindi". Omit to answer in the
+    #: language the student writes in.
+    language: str | None = Field(default=None, max_length=30, pattern=r"^[A-Za-z][A-Za-z ()-]*$")
 
 
 class AgentChatResponse(BaseModel):

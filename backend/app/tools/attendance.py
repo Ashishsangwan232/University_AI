@@ -49,6 +49,8 @@ def _subject_from_course(item: dict[str, Any]) -> dict[str, Any] | None:
         "short": (code or "UMS").replace(" ", ""),
         "attended": attended,
         "total": total,
+        # Worked out here so a chart never depends on the model's arithmetic.
+        "percentage": round(attended / total * 100, 1),
         "teacher": "",
     }
 

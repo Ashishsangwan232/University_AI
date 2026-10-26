@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { PiArrowsClockwise, PiCheck, PiCopy, PiSidebarSimple, PiSpeakerHigh, PiSpeakerSlash } from 'react-icons/pi'
+import { AnimatePresence, motion } from 'framer-motion'
+import { Check, Copy, PanelLeftOpen, RotateCw, Volume2, VolumeX } from 'lucide-react'
 import type { ChatMessage } from '../../types'
 import type { AgentProviders } from '../../api/campusApi'
+import { AnimatedIcon } from '../ui/AnimatedIcon'
+import { iconButtonMotion } from '../ui/iconMotion'
+import { DynamicText, GreetingPreloader } from '../ui/GreetingPreloader'
+import { LoaderGooeyBlobs } from '../ui/LoaderGooeyBlobs'
 import { AIMessage } from './AIMessage'
 import { MascotInput, RobotMascot, type Effort } from './MascotInput'
 
 type Props = {
   messages: ChatMessage[]
-  /** Send a question with the current model and effort. */
+  /** Send a question with the current model, effort and language. */
   ask: (prompt: string) => void
   /** Ask the last question again, replacing the last answer. */
   retry: () => void
@@ -17,19 +22,23 @@ type Props = {
   providers: AgentProviders | null
   provider: string
   effort: Effort
+  language: string
   onProviderChange: (id: string) => void
   onEffortChange: (effort: Effort) => void
+  onLanguageChange: (language: string) => void
   sidebarOpen: boolean
   openSidebar: () => void
+  /** True while the UMS browser is being opened after "Connect UMS". */
+  umsConnecting: boolean
 }
 
 const SUGGESTIONS = [
-  'What is my attendance?',
+  'Show my attendance as a chart',
   'Which class do I have next?',
   'Summarise my last 5 messages',
-  'How much leave do I have left?',
+  'How do I apply for hostel leave? Show the steps',
   'When are the end term exams?',
-  'Hostel fees for a 2 seater AC room',
+  'Compare hostel fees for AC rooms',
 ]
 
 /** What the assistant is doing, said honestly as time passes. */
@@ -50,7 +59,19 @@ function Thinking() {
   return (
     <div className="turn ai">
       <div className="thinking-row">
-        <span className="thinking-shimmer">{stage.text}</span>
+        <LoaderGooeyBlobs size={9} duration={1.4} color="var(--ok)" />
+        <AnimatePresence mode="wait">
+          <motion.span
+            key={stage.text}
+            className="thinking-shimmer"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.2 }}
+          >
+            {stage.text}
+          </motion.span>
+        </AnimatePresence>
         {seconds >= 4 && <span className="thinking-seconds">{seconds}s</span>}
       </div>
     </div>
@@ -60,6 +81,7 @@ function Thinking() {
 /** Markdown-ish answer text as plain words, for copying and reading aloud. */
 function plain(text: string): string {
   return text
+    .replace(/```[\s\S]*?```/g, '')
     .replace(/\*\*|__|`/g, '')
     .replace(/^\s*[-*•]\s+/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
@@ -97,25 +119,45 @@ function AnswerActions({ text, onRetry, canRetry }: { text: string; onRetry: () 
 
   return (
     <div className="answer-actions">
-      <button title={copied ? 'Copied' : 'Copy'} aria-label="Copy answer" onClick={copy}>
-        {copied ? <PiCheck size={17} /> : <PiCopy size={17} />}
-      </button>
+      <motion.button {...iconButtonMotion} title={copied ? 'Copied' : 'Copy'} aria-label="Copy answer" onClick={copy}>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={copied ? 'done' : 'copy'}
+            initial={{ scale: 0.5, rotate: -45, opacity: 0 }}
+            animate={{ scale: 1, rotate: 0, opacity: 1 }}
+            exit={{ scale: 0.5, rotate: 45, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            style={{ display: 'inline-flex' }}
+          >
+            {copied ? <Check size={16} className="text-emerald-500" /> : <AnimatedIcon icon={Copy} size={16} motion="pop" />}
+          </motion.span>
+        </AnimatePresence>
+      </motion.button>
       {canSpeak && (
-        <button title={speaking ? 'Stop reading' : 'Read aloud'} aria-label={speaking ? 'Stop reading' : 'Read answer aloud'} onClick={speak}>
-          {speaking ? <PiSpeakerSlash size={17} /> : <PiSpeakerHigh size={17} />}
-        </button>
+        <motion.button {...iconButtonMotion} title={speaking ? 'Stop reading' : 'Read aloud'} aria-label={speaking ? 'Stop reading' : 'Read answer aloud'} onClick={speak}>
+          {speaking
+            ? (
+              <motion.span animate={{ scale: [1, 1.15, 1] }} transition={{ duration: 0.9, repeat: Infinity }} style={{ display: 'inline-flex' }}>
+                <VolumeX size={16} className="text-emerald-500" />
+              </motion.span>
+            )
+            : <AnimatedIcon icon={Volume2} size={16} motion="wiggle" />}
+        </motion.button>
       )}
       {canRetry && (
-        <button title="Ask again" aria-label="Ask again" onClick={onRetry}>
-          <PiArrowsClockwise size={17} />
-        </button>
+        <motion.button {...iconButtonMotion} title="Ask again" aria-label="Ask again" onClick={onRetry}>
+          <AnimatedIcon icon={RotateCw} size={16} motion="spin" />
+        </motion.button>
       )}
     </div>
   )
 }
 
 export function Chat(props: Props) {
-  const { messages, ask, retry, cancel, thinking, providers, provider, effort, onProviderChange, onEffortChange } = props
+  const {
+    messages, ask, retry, cancel, thinking, providers, provider, effort, language,
+    onProviderChange, onEffortChange, onLanguageChange,
+  } = props
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // A chat is "fresh" until the student has asked something.
@@ -135,19 +177,30 @@ export function Chat(props: Props) {
       providers={providers}
       provider={provider}
       effort={effort}
+      language={language}
       onProviderChange={onProviderChange}
       onEffortChange={onEffortChange}
+      onLanguageChange={onLanguageChange}
       menuPlacement={fresh ? 'down' : 'up'}
     />
   )
 
   return (
     <main className="main">
+      {/* While UMS opens, the greeting preloader covers the chat area. */}
+      <GreetingPreloader
+        active={props.umsConnecting}
+        loop
+        fullPage={false}
+        intervalMs={420}
+        caption="Opening UMS… sign in in the window that appears"
+      />
+
       <header className="main-top">
         {!props.sidebarOpen && (
-          <button className="icon-btn" title="Open sidebar" aria-label="Open sidebar" onClick={props.openSidebar}>
-            <PiSidebarSimple size={20} />
-          </button>
+          <motion.button {...iconButtonMotion} className="icon-btn" title="Open sidebar" aria-label="Open sidebar" onClick={props.openSidebar}>
+            <AnimatedIcon icon={PanelLeftOpen} motion="nudge" size={19} />
+          </motion.button>
         )}
         <span className="main-title">CampusAI</span>
       </header>
@@ -157,13 +210,15 @@ export function Chat(props: Props) {
           <div className="home-inner">
             <div className="home-hero">
               <RobotMascot emotion={thinking ? 'thinking' : 'reading'} />
+              {/* Free time: a slow greeting in many languages. */}
+              <DynamicText loop intervalMs={1800} className="home-greeting" />
               <h1>What can I help with?</h1>
-              <p>Your attendance, classes, notices and leave from UMS — plus anything about LPU.</p>
+              <p>Your attendance, classes, notices and leave from UMS — plus anything about LPU, in your language.</p>
             </div>
             {input}
             <div className="suggestions">
               {SUGGESTIONS.map(text => (
-                // Sends directly with the chosen model and effort - exactly once.
+                // Sends directly with the chosen settings - exactly once.
                 <button key={text} disabled={thinking} onClick={() => ask(text)}>{text}</button>
               ))}
             </div>
@@ -174,7 +229,13 @@ export function Chat(props: Props) {
           <div className="thread" aria-live="polite">
             <div className="thread-inner">
               {messages.map((m, i) => (
-                <div key={i} className={`turn ${m.role}`}>
+                <motion.div
+                  key={i}
+                  className={`turn ${m.role}`}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                >
                   {m.role === 'user' ? (
                     <div className="user-bubble">{m.text}</div>
                   ) : (
@@ -191,7 +252,7 @@ export function Chat(props: Props) {
                       )}
                     </>
                   )}
-                </div>
+                </motion.div>
               ))}
               {thinking && <Thinking />}
               <div ref={bottomRef} />

@@ -176,7 +176,14 @@ export type AgentProviders = { default: string; providers: AgentProvider[] }
  */
 export function askAgent(
   message: string,
-  options: { provider?: string; conversationId?: string; effort?: 'low' | 'medium' | 'high'; signal?: AbortSignal } = {},
+  options: {
+    provider?: string
+    conversationId?: string
+    effort?: 'low' | 'medium' | 'high'
+    /** Reply language, e.g. "Hindi". Omit to match the student's own language. */
+    language?: string
+    signal?: AbortSignal
+  } = {},
 ): Promise<AgentChatResponse> {
   return request<AgentChatResponse>('/api/agent/chat', {
     method: 'POST',
@@ -186,6 +193,7 @@ export function askAgent(
       ...(options.provider ? { provider: options.provider } : {}),
       ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
       ...(options.effort ? { effort: options.effort } : {}),
+      ...(options.language ? { language: options.language } : {}),
     }),
   })
 }

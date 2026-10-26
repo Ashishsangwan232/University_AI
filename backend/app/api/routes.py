@@ -44,6 +44,7 @@ def agent_chat(payload: AgentChatRequest, db: Session = Depends(get_db)):
         return AgentChatResponse(**ask_agent(
             payload.message, STUDENT_ID, db, payload.provider, payload.conversation_id,
             effort=payload.effort,
+            language=payload.language,
         ))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"No AI backend could answer: {exc}") from exc

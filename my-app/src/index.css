@@ -6,3 +6,19 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
+
+/* Thin scrollbars everywhere: no track, no arrow buttons, just a slim thumb. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 140, .35);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: rgba(140, 140, 140, .6); }
+/* Firefox has no ::-webkit-scrollbar; it gets the standard properties. */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: rgba(140, 140, 140, .45) transparent; }
+}
