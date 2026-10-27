@@ -185,7 +185,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "many matched and how many notices had an unreadable date, so report honestly rather "
             "than implying the list is complete when undated_skipped is above zero. Nothing in "
             "the data marks a notice as important - judge that from the wording yourself, and "
-            "say it is your reading rather than an official flag."
+            "say it is your reading rather than an official flag. Announcements are college "
+            "notices; when the student says message / msg / inbox, use get_messages instead."
         ),
         "parameters": {
             "type": "object",
@@ -197,7 +198,14 @@ TOOL_SPECS: list[dict[str, Any]] = [
                         "notice's own parsed date."
                     ),
                 },
-                "query": {"type": "string", "description": "Words that must all appear."},
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Topic words that must all appear, e.g. 'exam' or 'placement'. Never words "
+                        "like important, urgent, latest, new or any: those say what the student "
+                        "wants, not text to match."
+                    ),
+                },
                 "limit": {"type": "integer", "description": "How many to return. Default 10."},
             },
             "required": [],
@@ -216,6 +224,9 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "Report total_matching and say how many you show; if more matched than you list, "
             "say so - in plain words, never mention tools, APIs or field names. Each message has a 'when' (its date) - give it, and the sender "
             "when there is one. A date inside the text is a deadline, not the message's date. "
+            "For 'important' / 'urgent' / 'zaroori' messages, do NOT search for that word: get the "
+            "recent ones (no query) and point out the ones that look important - deadlines, "
+            "tests, fees, placements - saying it is your judgement. "
             "If UMS is not connected, say so and ask the student to click Connect UMS. Never "
             "invent messages or senders."
         ),
@@ -223,7 +234,13 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "description": "How many messages to return (max 100). Default 10."},
-                "query": {"type": "string", "description": "Search words, e.g. 'hitbullseye' or 'TATA ELXSI'."},
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Topic words, e.g. 'hitbullseye' or 'TATA ELXSI'. Never words like "
+                        "important, urgent, latest or new."
+                    ),
+                },
                 "days": {"type": "integer", "description": "Only messages from the last N days."},
             },
             "required": [],
@@ -372,6 +389,22 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+#: Words that say what kind of item the student wants, not text inside it.
+#: Searching for them ("important") finds nothing, so they are dropped.
+FILLER_WORDS = {
+    "important", "imp", "urgent", "latest", "new", "newest", "recent", "any", "all", "some",
+    "message", "messages", "msg", "msgs", "notice", "notices", "announcement", "announcements",
+    "zaroori", "jaruri", "zaruri", "koi", "sabhi", "naya", "naye", "nayi",
+    "ज़रूरी", "जरूरी", "महत्वपूर्ण", "कोई", "नया", "नए", "नई", "मैसेज", "संदेश",
+}
+
+
+def _topic_words(query: Any) -> str | None:
+    """The search words worth searching for; None when only filler is left."""
+    words = [w for w in str(query or "").split() if w.lower().strip(".,?!'\"") not in FILLER_WORDS]
+    return " ".join(words) or None
+
+
 def _int(args: dict[str, Any], key: str, default: int) -> int:
     """A tool argument as an int. Models sometimes send '5' rather than 5."""
     value = args.get(key, default)
@@ -426,12 +459,12 @@ def _execute_tool(name: str, args: dict[str, Any], student_id: str, db: Session)
             return get_recent_announcements_tool(
                 limit=_int(args, "limit", 10),
                 when=(args.get("when") or None),
-                query=(args.get("query") or None),
+                query=_topic_words(args.get("query")),
             )
         if name == "get_messages":
             return get_messages_tool(
                 limit=_int(args, "limit", 10),
-                query=(args.get("query") or None),
+                query=_topic_words(args.get("query")),
                 days=(_int(args, "days", 0) or None),
             )
         if name == "get_hostel_leave_balance":

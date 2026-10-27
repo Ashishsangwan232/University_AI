@@ -44,7 +44,25 @@ def _tidy(answer: str) -> str:
     numbers and line wrapping, and some models leave markers like 【source】."""
     answer = answer.replace("‑", "-").replace("‐", "-")
     answer = answer.replace(" ", " ").replace(" ", " ")
-    return re.sub(r"\s*【[^】]*】", "", answer)
+    return _drop_repeats(re.sub(r"\s*【[^】]*】", "", answer))
+
+
+def _drop_repeats(answer: str) -> str:
+    """Some models (gpt-oss on Ollama) now and then send their whole reply
+    twice in one message, or repeat a paragraph. Keep one copy."""
+    text = answer.strip()
+    # The whole answer twice, with or without a gap: "X.X." / "X.\n\nX."
+    middle = len(text) // 2
+    for cut in range(max(1, middle - 3), min(len(text), middle + 4)):
+        first, second = text[:cut].strip(), text[cut:].strip()
+        if len(first) >= 20 and first == second:
+            return first
+    # A paragraph repeated right after itself.
+    kept: list[str] = []
+    for block in re.split(r"\n{2,}", text):
+        if not (kept and block.strip() and block.strip() == kept[-1].strip()):
+            kept.append(block)
+    return "\n\n".join(kept)
 
 
 def describe() -> dict[str, Any]:

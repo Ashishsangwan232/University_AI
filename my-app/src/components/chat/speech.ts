@@ -24,15 +24,40 @@ export function speechRecognition(): SpeechCtor | null {
 
 export const canSpeak = () => typeof window !== 'undefined' && 'speechSynthesis' in window
 
-/** Joined transcript of every result so far, and whether the last one is final. */
+const comparable = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+/**
+ * Joined transcript of every result so far, and whether the last one is final.
+ * Some browsers (Edge) send a phrase again as a new piece that repeats or
+ * extends the one before ("4 seater" then "4 seater 4"); that piece replaces
+ * the earlier one instead of being added, so words are not doubled.
+ */
 export function transcriptOf(results: SpeechResultList): { text: string; final: boolean } {
-  let text = ''
+  const pieces: string[] = []
   let final = false
   for (let i = 0; i < results.length; i++) {
-    text += ' ' + (results[i]?.[0]?.transcript ?? '')
     final = Boolean(results[i]?.isFinal)
+    const piece = (results[i]?.[0]?.transcript ?? '').replace(/\s+/g, ' ').trim()
+    if (!piece) continue
+    const previous = pieces.length ? comparable(pieces[pieces.length - 1]) : ''
+    const current = comparable(piece)
+    if (previous && current.startsWith(previous)) pieces[pieces.length - 1] = piece // extends it
+    else if (previous && previous.endsWith(current)) continue                       // repeats it
+    else pieces.push(previous ? withoutOverlap(pieces[pieces.length - 1], piece) : piece)
   }
-  return { text: text.replace(/\s+/g, ' ').trim(), final }
+  return { text: pieces.filter(Boolean).join(' '), final }
+}
+
+/** "And 4 seater" + "4 seater 4" -> "4": drops the start of a piece that only
+ *  repeats the last two or more words of the piece before it. */
+function withoutOverlap(previous: string, piece: string): string {
+  const before = previous.split(' ')
+  const words = piece.split(' ')
+  for (let size = Math.min(before.length, words.length); size >= 2; size--) {
+    const tail = comparable(before.slice(-size).join(' '))
+    if (tail && tail === comparable(words.slice(0, size).join(' '))) return words.slice(size).join(' ')
+  }
+  return piece
 }
 
 /** Language the mic listens in: Hindi (also catches Hinglish) or English. Remembered. */
