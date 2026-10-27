@@ -142,8 +142,9 @@ function App() {
     } catch { /* leave it in the list if the delete failed */ }
   }
 
-  /** Send a question. `showQuestion` is false when re-asking the last one. */
-  const send = async (prompt: string, showQuestion = true) => {
+  /** Send a question. `showQuestion` is false when re-asking the last one;
+   *  `voice` asks for a short spoken answer (voice mode). */
+  const send = async (prompt: string, showQuestion = true, voice = false) => {
     const clean = prompt.trim()
     if (!clean || thinking) return
     if (showQuestion) setMessages(current => [...current, { role: 'user', text: clean }])
@@ -156,6 +157,7 @@ function App() {
         conversationId: conversationId || undefined,
         effort,
         language: language || undefined,
+        voice,
         signal: controller.signal,
       })
       if (response.conversation_id && response.conversation_id !== conversationId) setConversationId(response.conversation_id)
@@ -223,7 +225,7 @@ function App() {
 
       <Chat
         messages={messages}
-        ask={prompt => void send(prompt)}
+        ask={(prompt, voice) => void send(prompt, true, voice)}
         retry={retry}
         cancel={() => abortRef.current?.abort()}
         thinking={thinking}

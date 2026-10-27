@@ -9,3 +9,7 @@ google-genai
 requests
 # Drives the UMS browser session
 playwright
+# Read-aloud voice: Edge neural voice (free, online) with offline Piper as backup
+# (python scripts/download_voices.py for the Piper voices)
+edge-tts
+piper-tts

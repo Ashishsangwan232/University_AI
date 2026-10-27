@@ -17,6 +17,9 @@ class AgentChatRequest(BaseModel):
     #: Reply language chosen in the menu, e.g. "Hindi". Omit to answer in the
     #: language the student writes in.
     language: str | None = Field(default=None, max_length=30, pattern=r"^[A-Za-z][A-Za-z ()-]*$")
+    #: True when asked in voice mode: the answer is read aloud, so it should be
+    #: short and plain (no tables, charts or extra detail).
+    voice: bool = False
 
 
 class AgentChatResponse(BaseModel):

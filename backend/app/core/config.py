@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-6-luna"
     openai_base_url: str = "https://api.openai.com/v1"
     openai_timeout_seconds: int = 120
+    #: Read-aloud voice. "edge" = Microsoft Edge's free online neural voice
+    #: (no key, no cost; needs internet), with the offline Piper voices as the
+    #: backup. "piper" = offline Piper only.
+    tts_engine: str = "edge"
+    tts_edge_voice: str = "hi-IN-MadhurNeural"  # reads Hindi, Hinglish and English
+    tts_edge_timeout_seconds: float = 12.0
+    #: Offline Piper voices (the backup). Download: python scripts/download_voices.py
+    tts_voice_dir: str = "data/voices"
+    tts_voice_hindi: str = "hi_IN-pratham-medium"
+    tts_voice_english: str = "en_US-ryan-medium"
+    tts_max_chars: int = 1200
 
     # ------------------------------------------------------- chat memory
     #: Recent turns sent to the model verbatim, so follow-ups resolve.

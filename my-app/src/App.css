@@ -295,7 +295,23 @@ textarea:focus, textarea:focus-visible { outline: none; }
   backdrop-filter: blur(10px);
 }
 .voice-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; width: min(640px, 100%); text-align: center; }
-.voice-robot { position: relative; display: grid; place-items: center; width: 220px; height: 200px; }
+.voice-robot { position: relative; display: grid; place-items: center; width: 220px; height: 200px; border: 0; padding: 0; background: none; color: inherit; cursor: default; }
+.voice-robot[tabindex="0"] { cursor: pointer; }
+.voice-langs { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
+.voice-langs button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; padding: 6px 16px; border-radius: 999px; cursor: pointer; transition: background .15s, color .15s; }
+.voice-langs button.active { background: var(--active); color: var(--ink); }
+.voice-langs button:disabled { cursor: default; opacity: .6; }
+.voice-pending { min-height: 74px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.voice-countdown { width: 160px; height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.voice-countdown span { display: block; height: 100%; background: var(--ok); transform-origin: left; }
+.voice-hint { font-size: 13px; color: var(--muted); }
+.voice-pending-actions { display: flex; gap: 8px; }
+.voice-pending-actions button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer;
+}
+.voice-pending-actions button:hover { background: var(--hover); }
+.voice-pending-actions button.primary { background: var(--ok); border-color: var(--ok); color: #fff; }
 .voice-ring { position: absolute; width: 150px; height: 150px; border-radius: 50%; border: 2px solid var(--ok); pointer-events: none; }
 .voice-ring.listening { border-color: #ef4444; }
 .voice-status { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 18px; min-height: 28px; }

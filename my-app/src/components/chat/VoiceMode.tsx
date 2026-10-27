@@ -1,27 +1,37 @@
-// Hands-free voice mode: listen -> send when you pause -> read the answer
-// aloud -> listen again. Uses the browser's own speech recognition and
-// speech synthesis. Questions and answers also go into the chat as usual.
+// Hands-free voice mode: listen -> send after a short silence -> read the
+// answer aloud -> listen again. Listening uses the browser's speech
+// recognition (Hindi or English, your choice); answers are read by the free
+// offline Piper voice (browser voices if it is missing). Questions and answers
+// also go into the chat as usual.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Mic, MicOff, X } from 'lucide-react'
+import { Mic, MicOff, RotateCcw, Send, X } from 'lucide-react'
 import type { ChatMessage } from '../../types'
 import { AnimatedIcon } from '../ui/AnimatedIcon'
 import { iconButtonMotion } from '../ui/iconMotion'
 import { LoaderGooeyBlobs } from '../ui/LoaderGooeyBlobs'
 import { RobotMascot } from './RobotMascot'
-import { canSpeak, langFromText, pickVoice, speechRecognition, spokenText, transcriptOf, type SpeechRecognitionLike } from './speech'
+import { speakAloud, type SpeakHandle } from './speaker'
+import {
+  MIC_LANGS, saveMicLang, savedMicLang, speechRecognition, spokenText, transcriptOf,
+  type MicLang, type SpeechRecognitionLike,
+} from './speech'
 
 type Phase = 'listening' | 'thinking' | 'speaking' | 'paused'
 
 type Props = {
   open: boolean
   onClose: () => void
-  ask: (prompt: string) => void
+  /** voice=true asks for a short answer meant to be spoken. */
+  ask: (prompt: string, voice?: boolean) => void
   thinking: boolean
   messages: ChatMessage[]
   /** Speech code for the reply language, e.g. "hi-IN"; '' = the browser's language. */
   speechLang: string
 }
+
+/** How long you can pause mid-question before it is sent. */
+const SILENCE_MS = 2200
 
 const STATUS: Record<Phase, string> = {
   listening: 'Listening…',
@@ -30,25 +40,49 @@ const STATUS: Record<Phase, string> = {
   paused: 'Tap the mic and ask your question',
 }
 
+/** Errors that will not fix themselves by listening again. */
+const FATAL: Record<string, string> = {
+  'not-allowed': 'Microphone access is blocked. Allow it in the browser to use voice mode.',
+  'service-not-allowed': 'Microphone access is blocked. Allow it in the browser to use voice mode.',
+  'audio-capture': 'No microphone was found. Plug one in and tap the mic.',
+  network: 'Voice input needs internet: the browser turns speech into text online.',
+  'language-not-supported': 'This browser cannot listen in that language. Try the other one.',
+}
+
 export function VoiceMode({ open, onClose, ask, thinking, messages, speechLang }: Props) {
   const [phase, setPhase] = useState<Phase>('paused')
   const [heard, setHeard] = useState('')
   const [notice, setNotice] = useState('')
+  const [micLang, setMicLang] = useState<MicLang>(savedMicLang)
+  const [tick, setTick] = useState(0) // restarts the "sending soon" bar
+
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const speakerRef = useRef<SpeakHandle | null>(null)
   const openRef = useRef(open)
-  const sentAtRef = useRef(0)          // message count when the question was sent
+  const micLangRef = useRef(micLang)
+  const sentAtRef = useRef(0)       // message count when the question was sent
   const emptyTriesRef = useRef(0)
-  // listen() restarts itself (nothing heard yet); it does so through this ref.
-  const listenRef = useRef<() => void>(() => {})
-  const lang = speechLang || (typeof navigator !== 'undefined' ? navigator.language : '') || 'en-IN'
+  const committedRef = useRef('')   // heard before the browser restarted listening
+  const latestRef = useRef('')      // everything heard for this question so far
+  const fatalRef = useRef('')
+  const silenceRef = useRef<number | null>(null)
+  // listen() and send() call each other through refs (timers, restarts).
+  const listenRef = useRef<(keep?: boolean) => void>(() => {})
+  const sendRef = useRef<() => void>(() => {})
 
   useEffect(() => { openRef.current = open }, [open])
 
-  const stopListening = useCallback(() => {
+  const clearSilence = () => {
+    if (silenceRef.current !== null) window.clearTimeout(silenceRef.current)
+    silenceRef.current = null
+  }
+
+  const stopRecognition = useCallback(() => {
     const recognition = recognitionRef.current
     recognitionRef.current = null
     if (recognition) {
       recognition.onend = null
+      recognition.onresult = null
       try {
         if (recognition.abort) recognition.abort()
         else recognition.stop()
@@ -56,91 +90,117 @@ export function VoiceMode({ open, onClose, ask, thinking, messages, speechLang }
     }
   }, [])
 
-  const listen = useCallback(() => {
+  const stopSpeaking = () => {
+    speakerRef.current?.stop()
+    speakerRef.current = null
+  }
+
+  const send = useCallback(() => {
+    clearSilence()
+    const text = latestRef.current.trim()
+    stopRecognition()
+    committedRef.current = ''
+    latestRef.current = ''
+    if (!text) return
+    emptyTriesRef.current = 0
+    sentAtRef.current = -1 // set once the question shows up in the chat
+    setPhase('thinking')
+    ask(text, true)
+  }, [ask, stopRecognition])
+  useEffect(() => { sendRef.current = send }, [send])
+
+  /** Start listening. keep=true continues the same question after a restart. */
+  const listen = useCallback((keep = false) => {
     const Ctor = speechRecognition()
     if (!Ctor) {
       setNotice('This browser cannot listen. Voice mode works in Chrome and Edge.')
       setPhase('paused')
       return
     }
-    stopListening()
-    if (canSpeak()) window.speechSynthesis.cancel()
-    setHeard('')
-    setNotice('')
+    stopRecognition()
+    stopSpeaking()
+    if (!keep) {
+      clearSilence()
+      committedRef.current = ''
+      latestRef.current = ''
+      setHeard('')
+      setNotice('')
+    }
+    fatalRef.current = ''
     const recognition = new Ctor()
-    recognition.continuous = false   // ends by itself when you pause
+    recognition.continuous = true    // keeps listening through pauses; we decide when you're done
     recognition.interimResults = true
-    recognition.lang = lang
-    let latest = ''
+    recognition.lang = micLangRef.current
     recognition.onresult = event => {
-      latest = transcriptOf(event.results).text
-      setHeard(latest)
+      const now = transcriptOf(event.results).text
+      const full = [committedRef.current, now].filter(Boolean).join(' ')
+      if (!full || full === latestRef.current) return
+      latestRef.current = full
+      setHeard(full)
+      setNotice('')
+      // Every new word restarts the silence countdown.
+      clearSilence()
+      setTick(t => t + 1)
+      silenceRef.current = window.setTimeout(() => sendRef.current(), SILENCE_MS)
     }
     recognition.onerror = event => {
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setNotice('Microphone access is blocked. Allow it in the browser to use voice mode.')
-        setPhase('paused')
-      }
+      if (FATAL[event.error]) fatalRef.current = FATAL[event.error]
     }
     recognition.onend = () => {
       if (!openRef.current || recognitionRef.current !== recognition) return
       recognitionRef.current = null
-      if (latest) {
-        emptyTriesRef.current = 0
-        sentAtRef.current = -1 // set once the question shows up in the chat
-        setPhase('thinking')
-        ask(latest)
+      if (fatalRef.current) {
+        clearSilence()
+        setNotice(fatalRef.current)
+        setPhase('paused')
+      } else if (latestRef.current) {
+        // The browser stopped by itself mid-question: keep the words, keep listening.
+        committedRef.current = latestRef.current
+        listenRef.current(true)
       } else if (++emptyTriesRef.current < 3) {
-        listenRef.current() // nothing heard yet: keep listening a little longer
+        listenRef.current(true) // nothing heard yet: listen a little longer
       } else {
         emptyTriesRef.current = 0
+        setNotice("Didn't hear anything. Tap the mic and ask again.")
         setPhase('paused')
       }
     }
     recognitionRef.current = recognition
     setPhase('listening')
     try { recognition.start() } catch { setPhase('paused') }
-  }, [ask, lang, stopListening])
+  }, [stopRecognition])
   useEffect(() => { listenRef.current = listen }, [listen])
 
   const speak = useCallback((text: string) => {
-    if (!canSpeak() || !text) { if (openRef.current) listen(); return }
-    const voiceLang = langFromText(text, lang)
-    const voice = pickVoice(voiceLang)
-    // Speak sentence-sized pieces: Chrome stops long utterances after ~15 seconds.
-    // Split after . ! ? । only when a space follows, so "90.7%" stays whole.
-    const pieces = text.split(/(?<=[.!?।])\s+|\n+/).map(p => p.trim()).filter(Boolean)
-    window.speechSynthesis.cancel()
+    if (!text) { if (openRef.current) listenRef.current(); return }
     setPhase('speaking')
-    pieces.forEach((piece, i) => {
-      const utterance = new SpeechSynthesisUtterance(piece)
-      utterance.lang = voiceLang
-      if (voice) utterance.voice = voice
-      if (i === pieces.length - 1) {
-        utterance.onend = () => { if (openRef.current) listen() }
-        utterance.onerror = () => { if (openRef.current) setPhase('paused') }
-      }
-      window.speechSynthesis.speak(utterance)
+    speakerRef.current = speakAloud(text, {
+      fallbackLang: speechLang || 'en-IN',
+      onDone: reason => {
+        speakerRef.current = null
+        if (reason === 'ended' && openRef.current) listenRef.current()
+      },
     })
-  }, [lang, listen])
+  }, [speechLang])
+
+  const stopAll = useCallback(() => {
+    clearSilence()
+    stopRecognition()
+    stopSpeaking()
+  }, [stopRecognition])
 
   // Open: start listening. Close: stop everything.
   useEffect(() => {
     if (open) {
       emptyTriesRef.current = 0
       // Next tick, not inside this effect, so React does not re-render mid-effect.
-      const id = window.setTimeout(() => listen(), 0)
+      const id = window.setTimeout(() => listenRef.current(), 0)
       return () => window.clearTimeout(id)
-    } else {
-      // Every opening starts fresh (listen() resets what was heard).
-      stopListening()
-      if (canSpeak()) window.speechSynthesis.cancel()
     }
-    // Only when opening/closing; listen/stopListening are stable enough.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+    stopAll()
+  }, [open, stopAll])
 
-  useEffect(() => () => { stopListening(); if (canSpeak()) window.speechSynthesis.cancel() }, [stopListening])
+  useEffect(() => stopAll, [stopAll])
 
   // Remember where the chat was when the question went in...
   useEffect(() => {
@@ -157,10 +217,19 @@ export function VoiceMode({ open, onClose, ask, thinking, messages, speechLang }
   }, [phase, thinking, messages, speak])
 
   const toggleMic = () => {
-    if (phase === 'listening') { stopListening(); setPhase('paused') }
-    else if (phase === 'speaking') { window.speechSynthesis.cancel(); listen() }
-    else if (phase === 'paused') listen()
+    if (phase === 'listening') { clearSilence(); stopRecognition(); setPhase('paused') }
+    else if (phase === 'speaking' || phase === 'paused') listen()
   }
+
+  const chooseMic = (lang: MicLang) => {
+    if (lang === micLangRef.current) return
+    micLangRef.current = lang
+    setMicLang(lang)
+    saveMicLang(lang)
+    if (phase === 'listening' || phase === 'paused') listen()
+  }
+
+  const waiting = phase === 'listening' && heard.length > 0
 
   return (
     <AnimatePresence>
@@ -174,8 +243,29 @@ export function VoiceMode({ open, onClose, ask, thinking, messages, speechLang }
           role="dialog"
           aria-label="Voice mode"
         >
+          <div className="voice-langs" role="radiogroup" aria-label="Language you speak in">
+            {MIC_LANGS.map(item => (
+              <button
+                key={item.id}
+                role="radio"
+                aria-checked={micLang === item.id}
+                className={micLang === item.id ? 'active' : ''}
+                onClick={() => chooseMic(item.id)}
+                disabled={phase === 'thinking'}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
           <div className="voice-stage">
-            <div className="voice-robot">
+            <button
+              className="voice-robot"
+              onClick={phase === 'speaking' ? () => listen() : undefined}
+              title={phase === 'speaking' ? 'Stop and listen' : undefined}
+              aria-label={phase === 'speaking' ? 'Stop speaking and listen' : 'Robot'}
+              tabIndex={phase === 'speaking' ? 0 : -1}
+            >
               {/* Rings pulse out while it listens or speaks. */}
               {(phase === 'listening' || phase === 'speaking') && [0, 1, 2].map(i => (
                 <motion.span
@@ -193,15 +283,42 @@ export function VoiceMode({ open, onClose, ask, thinking, messages, speechLang }
                   isListening={phase === 'listening'}
                 />
               </div>
-            </div>
+            </button>
 
             <div className="voice-status">
               {phase === 'thinking' && <LoaderGooeyBlobs size={8} color="var(--ok)" />}
               <span>{STATUS[phase]}</span>
             </div>
             <p className={`voice-heard ${heard ? '' : 'empty'}`}>
-              {heard || (phase === 'listening' ? 'Ask about attendance, classes, exams, hostel…' : ' ')}
+              {heard || (phase === 'listening'
+                ? (micLang === 'hi-IN' ? 'पूछिए — attendance, classes, exams, hostel…' : 'Ask about attendance, classes, exams, hostel…')
+                : ' ')}
             </p>
+
+            <div className="voice-pending" aria-hidden={!waiting}>
+              {waiting && (
+                <>
+                  <div className="voice-countdown">
+                    <motion.span
+                      key={tick}
+                      initial={{ scaleX: 1 }}
+                      animate={{ scaleX: 0 }}
+                      transition={{ duration: SILENCE_MS / 1000, ease: 'linear' }}
+                    />
+                  </div>
+                  <span className="voice-hint">Pause is fine — it sends when you stop talking</span>
+                  <div className="voice-pending-actions">
+                    <button onClick={() => listen()} title="Start the question again">
+                      <RotateCcw size={14} /> Start over
+                    </button>
+                    <button className="primary" onClick={() => send()} title="Send now">
+                      <Send size={14} /> Send now
+                    </button>
+                  </div>
+                </>
+              )}
+              {phase === 'speaking' && <span className="voice-hint">Tap the robot or the mic to interrupt</span>}
+            </div>
             {notice && <p className="voice-notice">{notice}</p>}
           </div>
 

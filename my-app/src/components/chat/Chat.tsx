@@ -11,11 +11,13 @@ import { AIMessage } from './AIMessage'
 import { LANGUAGES } from './languages'
 import { MascotInput, ROBOT_LAYOUT_ID, RobotMascot, type Effort } from './MascotInput'
 import { VoiceMode } from './VoiceMode'
+import { speakAloud, type SpeakHandle } from './speaker'
+import { spokenText } from './speech'
 
 type Props = {
   messages: ChatMessage[]
   /** Send a question with the current model, effort and language. */
-  ask: (prompt: string) => void
+  ask: (prompt: string, voice?: boolean) => void
   /** Ask the last question again, replacing the last answer. */
   retry: () => void
   cancel: () => void
@@ -93,9 +95,9 @@ function plain(text: string): string {
 function AnswerActions({ text, onRetry, canRetry }: { text: string; onRetry: () => void; canRetry: boolean }) {
   const [copied, setCopied] = useState(false)
   const [speaking, setSpeaking] = useState(false)
-  const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window
+  const speakerRef = useRef<SpeakHandle | null>(null)
 
-  useEffect(() => () => { if (speaking) window.speechSynthesis.cancel() }, [speaking])
+  useEffect(() => () => speakerRef.current?.stop(), [])
 
   const copy = async () => {
     try {
@@ -105,18 +107,16 @@ function AnswerActions({ text, onRetry, canRetry }: { text: string; onRetry: () 
     } catch { /* clipboard blocked: nothing to do */ }
   }
 
+  // Offline Piper voice (Hindi or English by script), browser voice as fallback.
   const speak = () => {
     if (speaking) {
-      window.speechSynthesis.cancel()
-      setSpeaking(false)
+      speakerRef.current?.stop()
       return
     }
-    const utterance = new SpeechSynthesisUtterance(plain(text).replace(/https?:\/\/\S+/g, 'link'))
-    utterance.onend = () => setSpeaking(false)
-    utterance.onerror = () => setSpeaking(false)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(utterance)
     setSpeaking(true)
+    speakerRef.current = speakAloud(spokenText(text, 6000), {
+      onDone: () => { speakerRef.current = null; setSpeaking(false) },
+    })
   }
 
   return (
@@ -135,7 +135,7 @@ function AnswerActions({ text, onRetry, canRetry }: { text: string; onRetry: () 
           </motion.span>
         </AnimatePresence>
       </motion.button>
-      {canSpeak && (
+      {(
         <motion.button {...iconButtonMotion} title={speaking ? 'Stop reading' : 'Read aloud'} aria-label={speaking ? 'Stop reading' : 'Read answer aloud'} onClick={speak}>
           {speaking
             ? (

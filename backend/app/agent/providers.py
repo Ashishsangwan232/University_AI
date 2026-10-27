@@ -96,6 +96,16 @@ def order(requested: str | None = None) -> list[str]:
     return [name for name in sequence if not (name in seen or seen.add(name))]
 
 
+#: Asked in voice mode: the answer is read aloud, so it must be short and plain.
+VOICE_REPLY = (
+    "VOICE MODE: this answer will be spoken aloud, not read. Answer the question directly in "
+    "1-3 short, simple sentences, the way you would say it to a friend. Say only what was asked: "
+    "no tables, charts, diagrams, steps blocks, headings, bullet lists, links, sources, tips or "
+    "follow-up offers. For a summary of several items (for example the last 5 messages), say one "
+    "short plain sentence per item, nothing more. Never mention tools or where the data came from."
+)
+
+
 def ask(
     message: str,
     student_id: str,
@@ -104,6 +114,7 @@ def ask(
     conversation_id: str | None = None,
     effort: str | None = None,
     language: str | None = None,
+    voice: bool = False,
 ) -> dict[str, Any]:
     """Answer with the best model that will actually respond.
 
@@ -123,6 +134,8 @@ def ask(
             f"{context}\n\nReply language chosen by the student: {language}. Write the whole "
             f"answer in {language}, keeping course codes, numbers, dates, names and URLs as given."
         ).strip()
+    if voice:
+        context = f"{context}\n\n{VOICE_REPLY}".strip()
 
     for name in order(requested):
         agent_class = AGENTS[name]

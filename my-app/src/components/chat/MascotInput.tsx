@@ -10,7 +10,7 @@ import { AnimatedIcon } from '../ui/AnimatedIcon'
 import { iconButtonMotion } from '../ui/iconMotion'
 import { LANGUAGES } from './languages'
 import { RobotMascot, type Emotion } from './RobotMascot'
-import { speechRecognition, type SpeechRecognitionLike } from './speech'
+import { savedMicLang, speechRecognition, transcriptOf, type SpeechRecognitionLike } from './speech'
 
 export { RobotMascot }
 
@@ -148,17 +148,22 @@ export function MascotInput({
     const recognition = new Ctor()
     recognition.continuous = true
     recognition.interimResults = true
-    // Listen in the chosen reply language; Auto uses the browser's language.
-    recognition.lang = lang.speech || navigator.language || 'en-IN'
+    // Listen in the chosen reply language; Auto uses the voice-mode mic language
+    // (Hindi by default, which also understands Hinglish).
+    recognition.lang = lang.speech || savedMicLang()
+    let latest = basePromptRef.current
     recognition.onresult = event => {
-      let transcript = ''
-      for (let i = 0; i < event.results.length; i++) transcript += event.results[i]?.[0]?.transcript ?? ''
-      if (transcript) setPrompt(basePromptRef.current + transcript)
+      const transcript = transcriptOf(event.results).text
+      if (transcript) {
+        latest = basePromptRef.current + transcript
+        setPrompt(latest)
+      }
     }
-    recognition.onerror = event => { if (event.error !== 'no-speech') stopListening() }
+    recognition.onerror = event => { if (event.error !== 'no-speech' && event.error !== 'aborted') stopListening() }
     recognition.onend = () => {
-      // Chrome ends a session after a pause; keep going until the user stops.
+      // Chrome ends a session after a pause; keep going (and keep the words) until the user stops.
       if (listeningRef.current) {
+        basePromptRef.current = latest.trim() ? latest.trim() + ' ' : ''
         try { recognition.start() } catch { stopListening() }
       }
     }

@@ -1,5 +1,8 @@
 """HTTP API for the chatbot: chat, saved conversations, and the UMS session."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agent.providers import ask as ask_agent, describe as describe_providers
@@ -23,6 +26,7 @@ from app.schemas.agent import (
 )
 from app.ums.playwright_service import ums_playwright
 from app.ums.state import UMSLiveAttendanceUnavailable
+from app import speech
 
 router = APIRouter(prefix="/api")
 
@@ -45,6 +49,7 @@ def agent_chat(payload: AgentChatRequest, db: Session = Depends(get_db)):
             payload.message, STUDENT_ID, db, payload.provider, payload.conversation_id,
             effort=payload.effort,
             language=payload.language,
+            voice=payload.voice,
         ))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"No AI backend could answer: {exc}") from exc
@@ -107,6 +112,27 @@ def rename_conversation_route(conversation_id: str, payload: ConversationRename,
 def delete_conversation_route(conversation_id: str, db: Session = Depends(get_db)):
     delete_conversation(db, _find(db, conversation_id))
     return {"deleted": conversation_id}
+
+
+# ------------------------------------------------------------- read aloud
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/tts/status")
+def tts_status():
+    """Which free voice reads answers aloud (Edge, or offline Piper) and whether it is ready."""
+    return speech.status()
+
+
+@router.post("/tts")
+async def tts(payload: SpeakRequest):
+    """Speak text with the free Edge voice (MP3), or offline Piper (WAV) as backup."""
+    try:
+        audio, media_type = await run_in_threadpool(speech.synthesize, payload.text)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(content=audio, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
 
 
 # ------------------------------------------------------------------ UMS session

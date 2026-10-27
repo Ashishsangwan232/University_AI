@@ -31,6 +31,9 @@ def _configure_logging() -> None:
 async def lifespan(app: FastAPI):
     _configure_logging()
     init_db()
+    from app import speech
+
+    speech.preload()  # offline voices ready before the first read-aloud
     yield
     try:
         from app.ums.playwright_service import ums_playwright

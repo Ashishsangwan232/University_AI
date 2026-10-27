@@ -182,6 +182,8 @@ export function askAgent(
     effort?: 'low' | 'medium' | 'high'
     /** Reply language, e.g. "Hindi". Omit to match the student's own language. */
     language?: string
+    /** Asked in voice mode: the answer is spoken, so keep it short and plain. */
+    voice?: boolean
     signal?: AbortSignal
   } = {},
 ): Promise<AgentChatResponse> {
@@ -194,6 +196,7 @@ export function askAgent(
       ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
       ...(options.effort ? { effort: options.effort } : {}),
       ...(options.language ? { language: options.language } : {}),
+      ...(options.voice ? { voice: true } : {}),
     }),
   })
 }
@@ -249,4 +252,21 @@ export function describeUMSState(status: UMSSessionStatus | null): string {
   if (status.login_page || !status.authenticated) return 'Waiting for manual UMS login'
   if (!status.attendance_captured) return 'Authenticated — locating the attendance table'
   return 'Live UMS attendance captured'
+}
+
+/** Whether the free offline voices (Piper) are ready on the backend. */
+export function getTtsStatus(): Promise<{ available: boolean }> {
+  return request('/api/tts/status')
+}
+
+/** Spoken audio (WAV) for a piece of text, made by the offline Piper voice. */
+export async function ttsAudio(text: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+    signal,
+  })
+  if (!response.ok) throw new Error(`Voice failed (${response.status})`)
+  return response.blob()
 }

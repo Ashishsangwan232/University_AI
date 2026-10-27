@@ -29,22 +29,51 @@ export function transcriptOf(results: SpeechResultList): { text: string; final: 
   let text = ''
   let final = false
   for (let i = 0; i < results.length; i++) {
-    text += results[i]?.[0]?.transcript ?? ''
+    text += ' ' + (results[i]?.[0]?.transcript ?? '')
     final = Boolean(results[i]?.isFinal)
   }
-  return { text: text.trim(), final }
+  return { text: text.replace(/\s+/g, ' ').trim(), final }
+}
+
+/** Language the mic listens in: Hindi (also catches Hinglish) or English. Remembered. */
+export type MicLang = 'hi-IN' | 'en-IN'
+export const MIC_LANGS: { id: MicLang; label: string }[] = [
+  { id: 'hi-IN', label: 'हिंदी' },
+  { id: 'en-IN', label: 'English' },
+]
+const MIC_KEY = 'campusai.micLang'
+
+export function savedMicLang(): MicLang {
+  try { return localStorage.getItem(MIC_KEY) === 'en-IN' ? 'en-IN' : 'hi-IN' } catch { return 'hi-IN' }
+}
+
+export function saveMicLang(lang: MicLang) {
+  try { localStorage.setItem(MIC_KEY, lang) } catch { /* private window: not remembered */ }
+}
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/
+const TABLE_DIVIDER = /^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/
+
+/** A table row said as a short sentence ("CSE408, 39/42, 93%."). The header
+ *  row and the |---| divider are dropped; other lines pass through. */
+function tableRowAsSentence(line: string, next: string | undefined): string {
+  if (!TABLE_ROW.test(line)) return line
+  if (TABLE_DIVIDER.test(line) || (next !== undefined && TABLE_DIVIDER.test(next))) return ''
+  const cells = line.split('|').map(cell => cell.trim()).filter(Boolean)
+  return cells.length ? `${cells.join(', ')}.` : ''
 }
 
 /**
- * An answer as something worth hearing: charts, diagrams, step blocks and
- * tables are left out (they stay on screen), links become their labels,
- * Markdown symbols go, and long answers stop after a few sentences.
+ * An answer as something worth hearing: charts, diagrams and step blocks are
+ * left out (they stay on screen), table rows become short sentences, links
+ * become their labels, Markdown symbols go, and long answers stop after a few
+ * sentences.
  */
 export function spokenText(markdown: string, maxChars = 650): string {
   let text = markdown
     .replace(/```[\s\S]*?```/g, ' ')
     .split('\n')
-    .filter(line => !/^\s*\|.*\|\s*$/.test(line))           // tables
+    .map((line, i, lines) => tableRowAsSentence(line, lines[i + 1]))
     .filter(line => !/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) // dividers
     .filter(line => !/^[\s*_(>]*sources?\s*:/i.test(line))      // "Source: ..." lines (on screen)
     .join('\n')
