@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app import knowledge
 from app.api.routes import router
 from app.core.config import settings
 from app.db.init_db import init_db
@@ -31,6 +32,7 @@ def _configure_logging() -> None:
 async def lifespan(app: FastAPI):
     _configure_logging()
     init_db()
+    knowledge.warm_up()  # embedding model loads in the background
     from app import speech
 
     speech.preload()  # offline voices ready before the first read-aloud

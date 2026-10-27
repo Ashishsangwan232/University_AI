@@ -3,7 +3,9 @@
 A chat assistant for LPU students. It answers two kinds of questions:
 
 - **Your own data**, read live from the UMS portal: attendance, timetable, notices, messages, hostel leave balance, profile.
-- **General university information** from a file we maintain ourselves: [backend/data/university_info.md](backend/data/university_info.md) (contacts, attendance rules, academic calendar, hostel and mess fees, health centre, placements, scholarships…). Nothing is crawled or embedded at runtime.
+- **General university information** from a file we maintain ourselves: [backend/data/university_info.md](backend/data/university_info.md) (contacts, attendance rules, academic calendar, hostel and mess fees, health centre, placements, scholarships…). Nothing is crawled.
+
+Questions are matched to that file with **hybrid search (RAG)**: by meaning, using a small free embedding model that runs locally ([fastembed](https://github.com/qdrant/fastembed), `BAAI/bge-small-en-v1.5`, no API key), and by keyword. So "dorm rent" finds *Hostel fees* even though no word matches. The first start downloads the model (~67 MB) into `backend/data/rag/models`; after that it works offline. Set `KNOWLEDGE_EMBEDDINGS=false` for keyword-only search. Test it with `python scripts/test_knowledge.py`.
 
 ```
 my-app/   React chat UI (Vite)

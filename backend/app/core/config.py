@@ -10,6 +10,15 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///data/campusai.db"
     #: General university facts the bot answers from. Edit it, then restart.
     university_info_file: str = "data/university_info.md"
+    #: Search that file by meaning as well as by keyword (hybrid RAG). Runs a
+    #: small free embedding model locally with fastembed - no API key, no cost.
+    knowledge_embeddings: bool = True
+    knowledge_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    #: Where the model is downloaded on first run (~67 MB, git-ignored).
+    knowledge_embedding_dir: str = "data/rag"
+    #: Below this similarity a section only counts if it shares a keyword.
+    #: Unrelated questions ("who won the cricket world cup") score about 0.50.
+    knowledge_min_similarity: float = 0.52
     # --------------------------------------------------------------- agent
     #: Which model answers by default: "ollama" or "gemini". Both use exactly
     #: the same tools, so this only changes who writes the sentences.

@@ -13,3 +13,5 @@ playwright
 # (python scripts/download_voices.py for the Piper voices)
 edge-tts
 piper-tts
+# Free local embeddings for searching university_info.md by meaning (no API key)
+fastembed

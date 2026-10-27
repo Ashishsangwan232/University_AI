@@ -12,6 +12,9 @@ from app.tools.attendance import calculate_attendance, get_ums_attendance
 from app.tools.campus import get_announcements_tool, get_timetable_tool
 from app.ums.state import UMSLiveAttendanceUnavailable
 
+#: Greetings score up to ~0.59 against some sections; real questions ~0.65+.
+OFFLINE_MIN_SIMILARITY = 0.6
+
 
 @dataclass
 class AgentResult:
@@ -69,7 +72,8 @@ def _announcement_answer() -> AgentResult:
 
 
 def _info_answer(text: str) -> AgentResult | None:
-    found = search_university_info(text, limit=1)
+    # Every message lands here, small talk included, so demand a clear match.
+    found = search_university_info(text, limit=1, min_similarity=OFFLINE_MIN_SIMILARITY)
     if not found.get("results"):
         return None
     top = found["results"][0]
