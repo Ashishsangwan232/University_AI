@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     #: (no key, no cost; needs internet), with the offline Piper voices as the
     #: backup. "piper" = offline Piper only.
     tts_engine: str = "edge"
-    tts_edge_voice: str = "hi-IN-MadhurNeural"  # reads Hindi, Hinglish and English
+    tts_edge_voice: str = "hi-IN-MadhurNeural"  # Hindi (Devanagari) text
+    tts_edge_voice_english: str = "en-IN-PrabhatNeural"  # English and Hinglish in English letters
     tts_edge_timeout_seconds: float = 12.0
     #: Offline Piper voices (the backup). Download: python scripts/download_voices.py
     tts_voice_dir: str = "data/voices"

@@ -40,9 +40,12 @@ def _voice_path(name: str) -> Path:
     return folder / f"{name}.onnx"
 
 
+HINDI_SCRIPT = re.compile(r"[ऀ-ॿ]")  # Devanagari
+
+
 def voice_for(text: str) -> str:
-    """Hindi voice for Devanagari text, English voice for everything else."""
-    return settings.tts_voice_hindi if re.search(r"[ऀ-ॿ]", text) else settings.tts_voice_english
+    """Piper: Hindi voice for Devanagari text, English voice for everything else."""
+    return settings.tts_voice_hindi if HINDI_SCRIPT.search(text) else settings.tts_voice_english
 
 
 def _installed(module: str) -> bool:
@@ -66,6 +69,7 @@ def status() -> dict[str, Any]:
         "available": edge or piper_ok,
         "engine": "edge" if edge else "piper",
         "edge_voice": settings.tts_edge_voice if edge else None,
+        "edge_voice_english": settings.tts_edge_voice_english if edge else None,
         "backup": "piper" if piper_ok else None,
         "installed": installed,
         "voices": voices,
@@ -115,13 +119,19 @@ def _remember(key: str, value: tuple[bytes, str]) -> tuple[bytes, str]:
     return value
 
 
+def edge_voice_for(text: str) -> str:
+    """Madhur (Hindi) for Devanagari text, Prabhat (Indian English) otherwise -
+    the Hindi voice reads English words with Hindi pronunciation."""
+    return settings.tts_edge_voice if HINDI_SCRIPT.search(text) else settings.tts_edge_voice_english
+
+
 def _edge(text: str) -> bytes:
     """MP3 from the Edge neural voice. Raises when offline or refused."""
     import edge_tts
 
     async def run() -> bytes:
         audio = bytearray()
-        async for chunk in edge_tts.Communicate(text, settings.tts_edge_voice).stream():
+        async for chunk in edge_tts.Communicate(text, edge_voice_for(text)).stream():
             if chunk.get("type") == "audio" and chunk.get("data"):
                 audio.extend(chunk["data"])
         return bytes(audio)
@@ -139,7 +149,7 @@ def synthesize(text: str) -> tuple[bytes, str]:
     if not text:
         raise RuntimeError("Nothing to say.")
     if _use_edge():
-        key = hashlib.sha1(f"edge|{settings.tts_edge_voice}|{text}".encode("utf-8")).hexdigest()
+        key = hashlib.sha1(f"edge|{edge_voice_for(text)}|{text}".encode("utf-8")).hexdigest()
         if key in _cache:
             _cache.move_to_end(key)
             return _cache[key]

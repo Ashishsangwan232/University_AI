@@ -59,7 +59,8 @@ const TABLE_DIVIDER = /^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/
 function tableRowAsSentence(line: string, next: string | undefined): string {
   if (!TABLE_ROW.test(line)) return line
   if (TABLE_DIVIDER.test(line) || (next !== undefined && TABLE_DIVIDER.test(next))) return ''
-  const cells = line.split('|').map(cell => cell.trim()).filter(Boolean)
+  // Empty cells ("–", "-", "—") are skipped, not read out.
+  const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell && !/^[–—-]+$/.test(cell))
   return cells.length ? `${cells.join(', ')}.` : ''
 }
 

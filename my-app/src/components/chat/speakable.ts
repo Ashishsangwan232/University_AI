@@ -13,8 +13,8 @@ const MONTHS = {
 }
 
 const WORDS = {
-  en: { crore: 'crore', lakh: 'lakh', thousand: 'thousand', rupees: 'rupees', percent: 'percent', point: 'point', to: 'to', and: 'and', then: 'then' },
-  hi: { crore: 'करोड़', lakh: 'लाख', thousand: 'हज़ार', rupees: 'रुपये', percent: 'प्रतिशत', point: 'दशमलव', to: 'से', and: 'और', then: 'फिर' },
+  en: { crore: 'crore', lakh: 'lakh', thousand: 'thousand', rupees: 'rupees', percent: 'percent', point: 'point', to: 'to', and: 'and', then: 'then', about: 'about', by: 'by' },
+  hi: { crore: 'करोड़', lakh: 'लाख', thousand: 'हज़ार', rupees: 'रुपये', percent: 'प्रतिशत', point: 'दशमलव', to: 'से', and: 'और', then: 'फिर', about: 'लगभग', by: 'बाई' },
 }
 
 /** English letter names in Hindi, so "CSE" is said "सी एस ई" by the Hindi voice. */
@@ -75,6 +75,9 @@ export function speakable(text: string, lang: SpeechLang): string {
   out = out.replace(/\b(\d+)\s?\/\s?(\d+)\b/g, (_a, a: string, b: string) =>
     lang === 'hi' ? `${b} में से ${a}` : `${a} out of ${b}`)
 
+  // Academic years: 2026-27 is said "2026 27", not "2026 to 27".
+  out = out.replace(/\b(20\d{2})\s?[–—-]\s?(\d{2})\b/g, '$1 $2')
+
   // Ranges: 14–30 December, 4–5 PM.
   out = out.replace(/\b(\d+)\s?[–—-]\s?(\d+)\b/g, `$1 ${w.to} $2`)
 
@@ -87,7 +90,12 @@ export function speakable(text: string, lang: SpeechLang): string {
     out = out.replace(/\b[A-Z]{2,5}\b/g, code => code.split('').map(ch => HINDI_LETTERS[ch] ?? ch).join(' '))
   }
 
-  // Symbols.
+  // Symbols and short forms.
   out = out.replace(/\s&\s/g, ` ${w.and} `).replace(/\s?[→⇒]\s?/g, `, ${w.then} `)
+  out = out.replace(/≈\s?/g, `${w.about} `).replace(/(\d)\s?[×x]\s?(\d)/g, `$1 ${w.by} $2`)
+  if (lang === 'en') {
+    out = out.replace(/\be\.g\.,?/gi, 'for example,').replace(/\bi\.e\.,?/gi, 'that is,')
+      .replace(/(\d)\s?hrs?\b/gi, '$1 hours').replace(/\/day\b/g, ' a day')
+  }
   return out.replace(/[ \t]+/g, ' ').trim()
 }
