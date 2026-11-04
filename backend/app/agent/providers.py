@@ -155,6 +155,27 @@ def ask(
     if voice:
         context = f"{context}\n\n{VOICE_REPLY}".strip()
 
+    # Clearly not about LPU or studies: refuse here, without calling a model.
+    from app.agent.scope import REFUSAL, is_off_topic
+
+    if is_off_topic(message):
+        refused = {
+            "answer": REFUSAL,
+            "intent": "out_of_scope",
+            "tool_used": None,
+            "source": "CampusAI",
+            "action": None,
+            "provider": "local",
+            "provider_label": "CampusAI",
+            "model": "scope-check",
+            "fell_back_from": [],
+            "conversation_id": conversation.id,
+            "conversation_title": conversation.title,
+            "history_turns": len(history),
+        }
+        memory.record_exchange(db, conversation, message, refused)
+        return refused
+
     for name in order(requested):
         agent_class = AGENTS[name]
         if not agent_class.available():

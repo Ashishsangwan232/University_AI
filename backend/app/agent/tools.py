@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.agent.scope import SCOPE_RULE
 from app.knowledge import search as search_university_info
 from app.tools.attendance import (
     calculate_attendance,
@@ -318,6 +319,7 @@ TOOL_NAMES = tuple(spec["name"] for spec in TOOL_SPECS)
 
 SYSTEM_INSTRUCTION = (
     "You are CampusAI, a chat assistant for a student at Lovely Professional University (LPU). "
+    f"{SCOPE_RULE} "
     "Use tools whenever the answer depends on the student's own data or on university facts. "
     "Student data (attendance, timetable, notices, messages, leave, profile) is read live from "
     "the UMS portal. If a UMS tool reports available=false, explain which step failed and tell "

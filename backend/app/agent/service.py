@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.agent.scope import REFUSAL
 from app.knowledge import search as search_university_info
 from app.tools.attendance import calculate_attendance, get_ums_attendance
 from app.tools.campus import get_announcements_tool, get_timetable_tool
@@ -96,8 +97,4 @@ def answer(text: str, student_id: str, db: Session) -> AgentResult:
     info = _info_answer(text)
     if info:
         return info
-    return AgentResult(
-        "I can help with your attendance, timetable, notices, messages and hostel leave from UMS, "
-        "and with general LPU information like contacts, rules, exam dates and hostel fees.",
-        "general", None, "CampusAI",
-    )
+    return AgentResult(REFUSAL, "general", None, "CampusAI")
