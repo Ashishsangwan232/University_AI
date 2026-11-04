@@ -21,7 +21,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.agent.scope import SCOPE_RULE
+from app.agent.scope import SCOPE_REMINDER, SCOPE_RULE
 from app.knowledge import search as search_university_info
 from app.tools.attendance import (
     calculate_attendance,
@@ -387,7 +387,8 @@ SYSTEM_INSTRUCTION = (
     "mera attendance kitna hai'), reply in Hinglish in English letters too, never in Devanagari. "
     "Do this unless a reply language is set in the "
     "context below or the student asks for one, which then wins until they change it. Keep "
-    "course codes, numbers, dates, names, phone numbers and URLs exactly as given."
+    "course codes, numbers, dates, names, phone numbers and URLs exactly as given. "
+    f"{SCOPE_REMINDER}"
 )
 
 

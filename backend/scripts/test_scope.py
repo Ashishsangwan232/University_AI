@@ -1,4 +1,7 @@
-"""Tests for the LPU/academics-only scope check. No network, no model.
+"""Checks that every model gets the LPU-only scope rule. No network, no model.
+
+Whether a question is in scope is decided by the model, so this only checks
+the rule is in place. To see real refusals, ask the running app.
 
     python scripts/test_scope.py
 """
@@ -9,54 +12,18 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from app.agent.scope import is_off_topic  # noqa: E402
+from app.agent.scope import REFUSAL, SCOPE_REMINDER, SCOPE_RULE  # noqa: E402
 from app.agent.tools import SYSTEM_INSTRUCTION  # noqa: E402
 
-BLOCKED = [
-    "suggest me a good movie to watch",
-    "tell me a joke",
-    "who won the cricket match yesterday",
-    "what is the bitcoin price today",
-    "give me a biryani recipe",
-    "how do I impress my crush",
-    "write a love letter for my girlfriend",
-    "best phone under 20000",
-    "koi accha gaana sunao",
-    "what is my horoscope for today",
-    "who will win the elections",
-    "how to get better at valorant",
-    "lyrics of a song",
-]
-
-ALLOWED = [
-    "what is my attendance",
-    "hi",
-    "thanks",
-    "what are LPU hostel fees",
-    "explain binary search",
-    "what is cryptography",
-    "solve x^2 - 4 = 0",
-    "how do I prepare for my exam",
-    "what is my timetable tomorrow",
-    "is there a cricket ground on campus",
-    "LPU placement stats",
-    "bhai mera attendance kitna hai",
-    "help me with my assignment on operating systems",
-    "what about tomorrow?",
-]
-
 failed = []
-for q in BLOCKED:
-    if not is_off_topic(q):
-        failed.append(f"should block: {q!r}")
-for q in ALLOWED:
-    if is_off_topic(q):
-        failed.append(f"should allow: {q!r}")
-if "STRICT SCOPE" not in SYSTEM_INSTRUCTION:
-    failed.append("system instruction is missing the scope rule")
+if not SYSTEM_INSTRUCTION.startswith("You are CampusAI") or SCOPE_RULE not in SYSTEM_INSTRUCTION[:3000]:
+    failed.append("scope rule is not at the start of the system instruction")
+if not SYSTEM_INSTRUCTION.endswith(SCOPE_REMINDER):
+    failed.append("scope reminder is not at the end of the system instruction")
+if REFUSAL not in SCOPE_RULE:
+    failed.append("scope rule does not carry the refusal text")
 
-total = len(BLOCKED) + len(ALLOWED) + 1
-print(f"{total - len(failed)}/{total} passed")
+print(f"{3 - len(failed)}/3 passed")
 for f in failed:
     print("FAIL", f)
 sys.exit(1 if failed else 0)
